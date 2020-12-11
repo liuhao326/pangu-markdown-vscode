@@ -37,54 +37,34 @@ class PanguFormatter {
 	updateDocument() {
 		let editor = vscode.window.activeTextEditor;
 		let doc = editor.document;
-		// Only update status if an Markdown file
+		
 		if (doc.languageId === "markdown") {
 
-			// 全局替换
-			// 注意：全局更替使用\s时要小心，避免将回车更替了
 			vscode.window.activeTextEditor.edit((editorBuilder) => {
 				let content = doc.getText(this.current_document_range(doc));
-				// 在全文最后增加两个回车，结束文档整理前再删除最后一个回车，就可以满足Markdown的要求了
-				content = content + "\n\n";
 
-				// 替换所有的全角数字为半角数字
+				/* 全局替换 */
+				// 全角数字 ——> 半角数字
 				content = this.replaceFullNums(content);
-				// 替换所有的全角英文和@标点 为 半角的英文和@标点
+				// 全角英文和＠ ——> 半角英文和@
 				content = this.replaceFullChars(content);
 				// 删除多余的内容（回车）
 				content = this.condenseContent(content);
 
-				// 每行操作
+				/* 每行操作 */
 				content = content.split("\n").map((line) => {
-					// 中文内部使用全角标点
 					line = this.replacePunctuations(line);
 					// 删除多余的空格
 					line = this.deleteSpaces(line);
 					// 插入必要的空格
 					line = this.insertSpace(line);
-
-					// 将有编号列表的“1. ”改成 “1.  ”
-					line = line.replace(/^(\s*)(\d\.)\s+(\S)/, '$1$2  $3');
-					// 将无编号列表的“* ”改成 “-   ”
-					// 将无编号列表的“- ”改成 “-   ”
-					line = line.replace(/^(\s*)[-\*]\s+(\S)/, '$1-   $2');
-					// XXX 不要修改缩进，因为自动修改缩进有可能会改变原文的意思，缩进出错只能由作者手工调整
-
-					// 再次补充空格，将被删除的但是是必须的空格补齐
-					// 在标题的 # 后面需要增加空格
-					line= line.replace(/^(#{1,})\s*(\S)/g,"$1 $2");
-
 					return line;
 				}).join("\n");
-
-				// 结束文档整理前再删除最后一个回车
-				content = content.replace(/(\n){2,}$/g, '$1');
-				content = content.replace(/(\r\n){2,}$/g, '$1');
 
 				editorBuilder.replace(this.current_document_range(doc), content);
 			});
 		} else {
-			vscode.window.showErrorMessage('不能处理非 Markdown 的文件!');
+			vscode.window.showErrorMessage('不能处理非 Markdown 格式的文件。');
 		};
 	};
 
@@ -168,40 +148,54 @@ class PanguFormatter {
 		return range;
 	};
 
-	//
 	condenseContent(content) {
-		// 将 制表符 改成 四个空格
-		content = content.replace(/\t/g, "    ");
-
+		// 制表符 ——> 四个空格
+		let config = vscode.workspace.getConfiguration('pangu-markdown-vscode')
+		if(config.get('covert_tabs_to_whitespace')){
+			content = content.replace(/\t/g, "    ");
+		}
 		// 删除超过2个的回车
 		// Unix 的只有 LF，Windows 的需要 CR LF
-		content = content.replace(/(\n){3,}/g, "$1$1");
-		content = content.replace(/(\r\n){3,}/g, "$1$1");
+		if(config.get('delete_extra_blank_lines')){
+			content = content.replace(/(\n){3,}/g, "$1$1");
+			content = content.replace(/(\r\n){3,}/g, "$1$1");
+			//删除文档结尾处多余的换行
+			content = content.replace(/(\n){2,}$/g, '');
+			content = content.replace(/(\r\n){2,}$/g, '');
+		}
 		return content;
 	};
 
 	replacePunctuations(content) {
-		// `, \ . : ; ? !` 改成 `，、。：；？！`
-		// 必须在结尾或者有空格的点才被改成句号
+		let config = vscode.workspace.getConfiguration('pangu-markdown-vscode')
+
+		//TODO：更完善的中文字符集
+		//TODO：考虑元字符
+		// 中文结尾处的 `, \ . : ; ? !` 改成 `，、。：；？！`
 		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF])\.($|\s*)/g, '$1。');
 		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF]),/g, '$1，');
 		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF]);/g, '$1；');
 		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF])!/g, '$1！');
 		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF])\?/g, '$1？');
 		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF])\\/g, '$1、');
-		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF])＼s*\:/g, '$1：');
+		content = content.replace(/([\u4e00-\u9fa5\u3040-\u30FF])\:/g, '$1：');
 
-		// 簡體中文使用直角引號
-		content = content.replace(/‘/g, "『");
-		content = content.replace(/’/g, "』");
-		content = content.replace(/“/g, "「");
-		content = content.replace(/”/g, "」");
-		// 括号使用半角标点
+		// 使用直角引号
+		if(config.get('covert_quotations')){
+			content = content.replace(/‘/g, "『");
+			content = content.replace(/’/g, "』");
+			content = content.replace(/“/g, "「");
+			content = content.replace(/”/g, "」");
+		}
+
+		// 使用半角括号
 		// 半角括号的两边都有空格就不在这里处理了，放到行中处理
-		content = content.replace(/\s*[（(]\s*/g, " ( ");
-		content = content.replace(/\s*[）)]\s*/g, " ) ");
+		if(config.get('covert_brackets_to_halfwidth')){
+			content = content.replace(/\s*[（\(]\s*/g, " ( ");
+			content = content.replace(/\s*[）\)]\s*/g, " ) ");
+		}
 
-		// 英文和数字内部的全角标点 `，。；‘’“”：？！＠＃％＆－＝＋｛｝【】｜＼～`改成半角标点
+		// 英文和数字内部的全角标点 ，。；‘’“”：？！＠＃％＆－＝＋｛｝【】｜＼～ 改成半角标点
 		content = content.replace(/(\w)\s*，\s*(\w)/g, "$1, $2");
 		content = content.replace(/(\w)\s*。\s*(\w)/g, "$1. $2");
 		content = content.replace(/(\w)\s*；\s*(\w)/g, "$1; $2");
@@ -227,11 +221,11 @@ class PanguFormatter {
 		content = content.replace(/(\w)\s*＼\s*(\w)/g, "$1 \ $2");
 		content = content.replace(/(\w)\s*～\s*(\w)/g, "$1~$2");
 		// 连续三个以上的 `。` 改成 `......`
-		content = content.replace(/[。]{3,}/g, '……');
+		content = content.replace(/[。]{3,}/g, '......');
 		// 截断连续超过一个的 ？和！ 为一个，「！？」也算一个
 		content = content.replace(/([！？]+)\1{1,}/g, '$1');
 		// 截断连续超过一个的 。，；：、“”『』〖〗《》 为一个
-		content = content.replace(/([。，；：、“”『』〖〗《》【】])\1{1,}/g, '$1');
+		content = content.replace(/([。，；：、“”「」『』〖〗《》【】])\1{1,}/g, '$1');
 		return content;
 	};
 
@@ -304,13 +298,14 @@ class PanguFormatter {
 		content = content.replace(/ｘ/g, "x");
 		content = content.replace(/ｙ/g, "y");
 		content = content.replace(/ｚ/g, "z");
+        content = content.replace(/＠/g, "@");
 		return content;
 	};
 };
 
 class Watcher {
 	getConfig() {
-		this._config = vscode.workspace.getConfiguration('pangu');
+		this._config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
 	};
 	constructor() {
 		this.getConfig();
