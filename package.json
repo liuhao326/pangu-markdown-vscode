@@ -24,7 +24,45 @@
 				"command": "pangu-markdown-vscode.formatPangu",
 				"title": "Pangu Format VSCode"
 			}
-		]
+		],
+		"menus": {
+			"editor/context": [{
+				"when": "resourceLangId == markdown",
+				"command": "pangu-markdown-vscode.formatPangu",
+				"group": "1_modification"
+			}]
+		},
+		"configuration": {
+			"type": "object",
+			"title": "Pangu Configuration",
+			"properties": {
+				"pangu-markdown-vscode.auto_format_on_save": {
+					"type": "boolean",
+					"default": false,
+					"description": "Auto apply Pangu format on save"
+				},
+				"pangu-markdown-vscode.covert_quotations": {
+					"type": "boolean",
+					"default": false,
+					"description": "Covert “” and ‘’ to 『』 and 「」"
+				},
+				"pangu-markdown-vscode.covert_brackets_to_halfwidth": {
+					"type": "boolean",
+					"default": false,
+					"description": "Covert （ and ）to ( and )"
+				},
+				"pangu-markdown-vscode.covert_tabs_to_whitespace": {
+					"type": "boolean",
+					"default": false,
+					"description": "Covert \\t to whitespace"
+				},
+				"pangu-markdown-vscode.delete_extra_blank_lines": {
+					"type": "boolean",
+					"default": true,
+					"description": "Replace multiple blank lines with one blank line"
+				}
+			}
+		}
 	},
 	"scripts": {
 		"lint": "eslint .",
