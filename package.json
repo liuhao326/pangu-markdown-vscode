@@ -41,15 +41,15 @@
 					"default": false,
 					"description": "Auto apply Pangu format on save"
 				},
-				"pangu-markdown-vscode.covert_quotations": {
+				"pangu-markdown-vscode.covert_Chinese_quotations": {
 					"type": "boolean",
 					"default": false,
 					"description": "Covert “” and ‘’ to 『』 and 「」"
 				},
-				"pangu-markdown-vscode.covert_brackets_to_halfwidth": {
+				"pangu-markdown-vscode.covert_English_quotations": {
 					"type": "boolean",
 					"default": false,
-					"description": "Covert （ and ）to ( and )"
+					"description": "Covert \"\" and '' to 『』 and 「」"
 				},
 				"pangu-markdown-vscode.covert_tabs_to_whitespace": {
 					"type": "boolean",
@@ -60,6 +60,16 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Replace multiple blank lines with one blank line"
+				},
+				"pangu-markdown-vscode.convert_fullwidthChars": {
+					"type": "boolean",
+					"default": true,
+					"description": "Convert fullwidth character to halfwidth character"
+				},
+				"pangu-markdown-vscode.convert_fullwidthNums": {
+					"type": "boolean",
+					"default": true,
+					"description": "Convert fullwidth number to halfwidth number"
 				}
 			}
 		}
