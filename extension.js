@@ -33,23 +33,50 @@ class PanguFormatter {
 		this.CJK = '\\u2e80-\\u2eff\\u2f00-\\u2fdf\\u3040-\\u309f\\u30a0-\\u30fa\\u30fc-\\u30ff\\u3100-\\u312f\\u3200-\\u32ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff'
 	};
 
+	// 获取可编辑文档的全部内容
+	getRange(doc) {
+		let start = new vscode.Position(0, 0);
+		let end = new vscode.Position(doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
+		let range = new vscode.Range(start, end);
+		return range;
+	};
+
 	updateDocument() {
-		//TODO：执行结束后选择文本或是光标位置不对的问题
-		let editor = vscode.window.activeTextEditor;
-		let doc = editor.document;
+		/*
+		!======思路======
+		?HTML及极端情况暂时不考虑
+		1. 全局操作
+			1.1 删除多余的换行//?（指南未提到，不排除刻意空行，应默认关闭）
+			1.2 数字使用半角字符
+			1.3 英文使用半角字符//?（指南未提到，不排除刻意使用全角，应默认关闭）
+		2. 逐行处理
+			!==空格==
+			2.1 中英文之间、中文与数字之间添加空格//?（使用类及类的继承来解决元字符问题）
+				2.1.1 "豆瓣FM"等专有名词，按官方所定义的格式书写；数字与单位（°和%等符号除外）之间需要增加空格//?（暂定为提示）
+			2.2 链接之间增加空格//?（争议项，应默认关闭）
+			2.3 全角标点与其他字符之间不加空格
+			!==标点符号==
+			2.4 不重复使用标点符号（？！、！？等算一个符号）
+			2.5 使用全角中文标点
+			2.6 遇到完整的英文整句、特殊名词，其内容使用半角标点
+			2.7 简体中文使用直角引号//?（争议项，应默认关闭）
+			!==名词==
+			2.7 专有名词使用正确的大小写、且不要使用不地道的缩写//?（暂定为提示）
+		*/
+		let doc = vscode.window.activeTextEditor.document;
 		if (doc.languageId === "markdown") {
 			vscode.window.activeTextEditor.edit((editorBuilder) => {
-				let text = doc.getText(this.current_document_range(doc));
+				let text = doc.getText(this.getRange(doc));
 
 				/* 全局替换 */
+				// 删除多余的换行
+				text = this.condenseContent(text);
 				// 全角数字 ——> 半角数字
 				text = this.replaceFullNums(text);
 				// 全角英文 ——> 半角英文
 				text = this.replaceFullChars(text);
-				// 删除多余的内容（回车）
-				text = this.condenseContent(text);
 
-				/* 每行操作 */
+				/* 逐行处理 */
 				text = text.split("\n").map((line) => {
 					// 处理标点
 					line = this.replacePunctuations(line);
@@ -62,7 +89,7 @@ class PanguFormatter {
 
 				properNounsAndAbbreviations();
 
-				editorBuilder.replace(this.current_document_range(doc), text);
+				editorBuilder.replace(this.getRange(doc), text);
 			});
 		} else {
 			vscode.window.showInformationMessage('不能处理非 Markdown 格式的文件。');
@@ -71,6 +98,9 @@ class PanguFormatter {
 
 	/* 全角标点与其他字符之间不加空格 */
 	deleteSpaces(text) {
+		//全角标点与其他字符之间
+		fullwidthPunctuations = "，。、《》？『』「」；∶【】｛｝—！＠￥％…（）"
+		text = text.replace(new RegExp("(\s*)([{punctuations}])(\s*)".replace(/\{punctuations\}/g, fullwidthPunctuations), "g"), '$2')
 		// 去掉「`()[]{}<>'"`」: 前后多余的空格
 		text = text.replace(/\s+([\(\)\[\]\{\}<>'":])\s+/g, ' $1 ');
 
@@ -132,28 +162,21 @@ class PanguFormatter {
 	数字与单位之间（度 / 百分比与数字之间不需要增加空格。）；
 	链接之间增加空格（争议） */
 	insertSpace(text) {
-		// 在 “中文English” 之间加入空格 “中文 English”
-		// 在 “中文123” 之间加入空格 “中文 123”
-		//TODO：更完善的中文字符集
-		text = text.replace(/([\u4e00-\u9fa5\u3040-\u30FF])([a-zA-Z0-9`])/g, '$1 $2');
+		// 在中文与英文、中文与数字、中文与`之间加入空格
+		let CJK = this.CJK
+		text = text.replace(new RegExp("([{CJK}])([a-zA-Z0-9`])".replace(/\{CJK\}/g, CJK), "g"), '$1 $2');
+		// 在中文与英文、中文与数字、中文与`之间加入空格（考虑星号）
+		text = text.replace(new RegExp("([a-zA-Z0-9`])([*]*[{CJK}])".replace(/\{CJK\}/g, CJK), "g"), "$1 $2");
 
-		// 在 “English中文” 之间加入空格 “English 中文”
-		// 在 “123中文” 之间加入空格 “123 中文”
-		text = text.replace(/([a-zA-Z0-9%`])([*]*[\u4e00-\u9fa5\u3040-\u30FF])/g, "$1 $2");
-
-		// 在 「100Gbps」之间加入空格「100 Gbps」（只有手工做，不能自动做，会破坏密码网址等信息）
+		// 在单位之间加入空格
+		console.log("如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：度/百分比与数字之间不需要增加空格）。");
 
 		// 在 「I said:it's a good news」的冒号与英文之间加入空格 「I said: it's a good news」
 		text = text.replace(/([:])\s*([a-zA-z])/g, "$1 $2");
-		return text;
-	};
 
-	// 获取可编辑文档的全部内容
-	current_document_range(doc) {
-		let start = new vscode.Position(0, 0);
-		let end = new vscode.Position(doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
-		let range = new vscode.Range(start, end);
-		return range;
+		//链接之间增加空格
+
+		return text;
 	};
 
 	/* 删除多余空行；tabs ——> 四个空格 */
@@ -169,8 +192,8 @@ class PanguFormatter {
 			text = text.replace(/(\n){3,}/g, "$1$1");
 			text = text.replace(/(\r\n){3,}/g, "$1$1");
 			//删除文档结尾处多余的换行
-			text = text.replace(/(\n){2,}$/g, '');
-			text = text.replace(/(\r\n){2,}$/g, '');
+			text = text.replace(/(\n){1,}$/g, '');
+			text = text.replace(/(\r\n){1,}$/g, '');
 		}
 		return text;
 	};
