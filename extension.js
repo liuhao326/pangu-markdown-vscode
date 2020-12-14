@@ -30,11 +30,13 @@ module.exports = {
 class PanguFormatter {
 	constructor() {
 		this.config = vscode.workspace.getConfiguration('pangu-markdown-vscode')
-		this.CJK = '\\u2e80-\\u2eff\\u2f00-\\u2fdf\\u3040-\\u309f\\u30a0-\\u30fa\\u30fc-\\u30ff\\u3100-\\u312f\\u3200-\\u32ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff'
+		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`
+		this.ANS = `a-zA-Z0-9`
+		
 	};
 
 	// 获取可编辑文档的全部内容
-	getRange(doc) {
+	getDocRange(doc) {
 		let start = new vscode.Position(0, 0);
 		let end = new vscode.Position(doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
 		let range = new vscode.Range(start, end);
@@ -42,35 +44,14 @@ class PanguFormatter {
 	};
 
 	updateDocument() {
-		/*
-		!======思路======
-		?HTML及极端情况暂时不考虑
-		1. 全局操作
-			1.1 删除多余的换行//?（指南未提到，不排除刻意空行，应默认关闭）
-			1.2 数字使用半角字符
-			1.3 英文使用半角字符//?（指南未提到，不排除刻意使用全角，应默认关闭）
-		2. 逐行处理
-			!==空格==
-			2.1 中英文之间、中文与数字之间添加空格//?（使用类及类的继承来解决元字符问题）
-				2.1.1 "豆瓣FM"等专有名词，按官方所定义的格式书写；数字与单位（°和%等符号除外）之间需要增加空格//?（暂定为提示）
-			2.2 链接之间增加空格//?（争议项，应默认关闭）
-			2.3 全角标点与其他字符之间不加空格
-			!==标点符号==
-			2.4 不重复使用标点符号（？！、！？等算一个符号）
-			2.5 使用全角中文标点
-			2.6 遇到完整的英文整句、特殊名词，其内容使用半角标点
-			2.7 简体中文使用直角引号//?（争议项，应默认关闭）
-			!==名词==
-			2.7 专有名词使用正确的大小写、且不要使用不地道的缩写//?（暂定为提示）
-		*/
 		let doc = vscode.window.activeTextEditor.document;
 		if (doc.languageId === "markdown") {
 			vscode.window.activeTextEditor.edit((editorBuilder) => {
-				let text = doc.getText(this.getRange(doc));
+				let text = doc.getText(this.getDocRange(doc));
 
-				/* 全局替换 */
+				/* 全局操作 */
 				// 删除多余的换行
-				text = this.condenseContent(text);
+				text = this.deleteExtraBlankLines(text);
 				// 全角数字 ——> 半角数字
 				text = this.replaceFullNums(text);
 				// 全角英文 ——> 半角英文
@@ -79,7 +60,7 @@ class PanguFormatter {
 				/* 逐行处理 */
 				text = text.split("\n").map((line) => {
 					// 处理标点
-					line = this.replacePunctuations(line);
+					line = this.replacePunctuation(line);
 					// 删除多余的空格
 					line = this.deleteSpaces(line);
 					// 插入必要的空格
@@ -89,7 +70,7 @@ class PanguFormatter {
 
 				properNounsAndAbbreviations();
 
-				editorBuilder.replace(this.getRange(doc), text);
+				editorBuilder.replace(this.getDocRange(doc), text);
 			});
 		} else {
 			vscode.window.showInformationMessage('不能处理非 Markdown 格式的文件。');
@@ -99,8 +80,8 @@ class PanguFormatter {
 	/* 全角标点与其他字符之间不加空格 */
 	deleteSpaces(text) {
 		//全角标点与其他字符之间
-		fullwidthPunctuations = "，。、《》？『』「」；∶【】｛｝—！＠￥％…（）"
-		text = text.replace(new RegExp("(\s*)([{punctuations}])(\s*)".replace(/\{punctuations\}/g, fullwidthPunctuations), "g"), '$2')
+		let fullwidthPunctuation = "，。、《》？『』「」；∶【】｛｝—！＠￥％…（）"
+		text = text.replace(new RegExp(String.raw`(\s*)([${fullwidthPunctuation}])(\s*)`, "g"), '$2')
 		// 去掉「`()[]{}<>'"`」: 前后多余的空格
 		text = text.replace(/\s+([\(\)\[\]\{\}<>'":])\s+/g, ' $1 ');
 
@@ -162,13 +143,25 @@ class PanguFormatter {
 	数字与单位之间（度 / 百分比与数字之间不需要增加空格。）；
 	链接之间增加空格（争议） */
 	insertSpace(text) {
-		// 在中文与英文、中文与数字、中文与`之间加入空格
-		let CJK = this.CJK
-		text = text.replace(new RegExp("([{CJK}])([a-zA-Z0-9`])".replace(/\{CJK\}/g, CJK), "g"), '$1 $2');
-		// 在中文与英文、中文与数字、中文与`之间加入空格（考虑星号）
-		text = text.replace(new RegExp("([a-zA-Z0-9`])([*]*[{CJK}])".replace(/\{CJK\}/g, CJK), "g"), "$1 $2");
+		let CJK = this.CJK;
+		let ANS = this.ANS;
 
-		// 在单位之间加入空格
+		// 中文与英文、中文与数字之间
+		text = new noMetaMatcher(`([${CJK}])`, `([${ANS}])`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑`）
+		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, "`", "(`)").addSpace(text);
+		// 中文与英文、中文与数字之间（考虑*）
+		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`(\*\*\*)`).addSpace(text);
+		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`(\*\*)`).addSpace(text);
+		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`(\*)`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑==）
+		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, `=`, `(==)`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑_）
+		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, `_`, `(_)`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑<>）
+		text = new DifferentMetaMatcher(`([${CJK}])`, `([${ANS}])`, `<`, `>`).addSpace(text);
+
+		// 在单位之间
 		console.log("如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：度/百分比与数字之间不需要增加空格）。");
 
 		// 在 「I said:it's a good news」的冒号与英文之间加入空格 「I said: it's a good news」
@@ -180,12 +173,8 @@ class PanguFormatter {
 	};
 
 	/* 删除多余空行；tabs ——> 四个空格 */
-	condenseContent(text) {
-		// 制表符 ——> 四个空格
+	deleteExtraBlankLines(text) {
 		let config = this.config
-		if (config.get('covert_tabs_to_whitespace')) {
-			text = text.replace(/\t/g, "    ");
-		}
 		// 删除超过2个的回车
 		// Unix 的只有 LF，Windows 的需要 CR LF
 		if (config.get('delete_extra_blank_lines')) {
@@ -204,26 +193,31 @@ class PanguFormatter {
 	简体中文使用直角引号（争议）；
 	不重复使用标点符号；
 	*/
-	replacePunctuations(text) {
-		/* 思路：转换必定要转为全角标点的半角标点 ——> 处理连续标点 ——> 引号转为直角引号 ——> 打印提示，使用者手动检查需要转为半角的全角及需要转为全角的半角标点 */
-
-		// 中文结尾处的半角标点 ——> 全角标点
-		let CJK = this.CJK
-		text = text.replace(new RegExp("([{CJK}])\\.([{CJK}A-Za-z0-9])".replace(/\{CJK\}/g, CJK), "g"), '$1。$2');// .——>。
-		text = text.replace(new RegExp("([{CJK}]),".replace("{CJK}", CJK), "g"), '$1，');// ,——>，
-		text = text.replace(new RegExp("([{CJK}]);".replace("{CJK}", CJK), "g"), '$1；');// ;——>；
-		text = text.replace(new RegExp("([{CJK}])!".replace("{CJK}", CJK), "g"), '$1！');// \!——>！
-		text = text.replace(new RegExp("([{CJK}])\?".replace("{CJK}", CJK), "g"), '$1？');// \?——>？
-		text = text.replace(new RegExp("([{CJK}])\:".replace("{CJK}", CJK), "g"), '$1：');// :——>：
-		text = text.replace(new RegExp("(\")([{CJK}]*)(\")".replace("{CJK}", CJK), "g"), '“$2”');// "" ——> “”
-		text = text.replace(new RegExp("[^\\]](\\()([{CJK}]*)(\\))".replace("{CJK}", CJK), "g"), '（$2）');// () ——> （）
-
-		// 连续三个以上的句号 ——> ......
-		text = text.replace(/(。|\.){3,}/g, '......');
-		// 多个标点符号 ——> 一个标点符号（！？及？！算一个）
-		text = text.replace(/(！？|？！|[！？。，；：、“”「」『』〖〗《》【】])(\1|[！？。，；：、“”「」『』〖〗《》【】]){1,}/g, '$1');
-
+	replacePunctuation(text) {
+		let CJK = this.CJK;
 		let config = this.config
+
+		// 半角标点 ——> 全角标点
+		text = text.replace(new RegExp(String.raw`([${CJK}])\.([^\.])`, "g"), '$1。$2');
+		text = text.replace(new RegExp(String.raw`([${CJK}])\?+`, "g"), '$1？');
+		text = text.replace(new RegExp(`([${CJK}])!+`, "g"), '$1！');
+		text = text.replace(new RegExp(`([${CJK}]),+`, "g"), '$1，');
+		text = text.replace(new RegExp(`([${CJK}]);+`, "g"), '$1；');
+		text = text.replace(new RegExp(`([${CJK}]):+`, "g"), '$1：');
+		text = text.replace(new RegExp(`([${CJK}])[-－–—]{2,}`, "g"), '$1——');
+		text = text.replace(new RegExp(`([${CJK}])～+`, "g"), '$1〜');
+		text = text.replace(new RegExp(String.raw`([^\]])(\()(.*)(\))`, "g"), '$1（$3）');
+		text = text.replace(new RegExp(`(")([ ${CJK}，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]*)(")`, "g"), '“$2”');
+
+		// >=3的句号或>=4的点号 ——> ......
+		text = text.replace(/(。{3,}|\.{4,})/g, '......');
+		// ?连续两个点号 ——> ...
+		if(config.get('condense_punctuation')){
+			// 多个标点符号 ——> 一个标点符号
+			text = text.replace(/(！？|？！|[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】])[⁇⁉⁈‽❗‼⸘\?\.;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】]+/g, '$1');
+			console.log("除省略号及两个连续的点号，重复的标点被替换为一个，如需要保留请自行更正。")
+		}
+
 		if (config.get('covert_Chinese_quotations')) {
 			// 中文引号 ——> 直角引号
 			text = text.replace(/‘/g, "『");
@@ -240,8 +234,8 @@ class PanguFormatter {
 		/* 完整的英文整句、特殊名词，其内容使用半角标点 */
 		//TODO：实现替换对应字符而不需要自己输入
 		console.log("标点替换结束，下列操作需手动完成：")
-		console.log("1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：(\\w+)")
-		console.log("2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\\?~:!,\\.'\"\\-;\\(\\)\\[\\]\\{\\}]")
+		console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^\w]|\s)(\w+)([^\w]|\s)`)
+		console.log(String.raw`2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\?~:!,\.'\"\-;\(\)\[\]\{\}]`)
 
 		return text;
 	};
@@ -351,3 +345,93 @@ class Watcher {
 		new PanguFormatter().updateDocument();
 	};
 };
+
+class noMetaMatcher {
+	constructor(group1, group2){
+		this.group1 = group1;
+		this.group2 = group2;
+	}
+
+	addSpace(text){
+		text = text.replace(new RegExp(this.group1 + this.group2, "g"), '$1 $2');
+		text = text.replace(new RegExp(this.group2 + this.group1, "g"), '$1 $2');
+		return text;
+	}
+}
+
+class SameMetaMatcher extends noMetaMatcher {
+	constructor(group1, group2, meta, metaGroup){
+		super(group1, group2);
+		this.meta = meta;
+		this.metaGroup1 = metaGroup;
+	}
+
+	addSpace(text){
+		let meta = this.meta;
+		let group1 = this.group1;
+		let group2 = this.group2;
+		let metaGroup = this.metaGroup;
+
+		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group1 + metaGroup + group2, "g"), '$3 $4');
+		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group2 + metaGroup + group1, "g"), '$3 $4');
+		text = text.replace(new RegExp(group1 + metaGroup + group2 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
+		text = text.replace(new RegExp(group2 + metaGroup + group1 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
+		return text;
+	}
+}
+
+class DifferentMetaMatcher extends noMetaMatcher {
+	constructor(group1, group2, meta1, meta2){
+		super(group1, group2);
+		this.meta1 = meta1;
+		this.meta2 = meta2;
+	}
+
+	addSpace(text){
+		/* let p = new RegExp(`(<)([^<]*)([${CJK}])(>)(${ANS})`);
+		p = new RegExp(`(<)([^<]*)([${ANS}])(>)(${CJK})`);
+		p = new RegExp(`([${CJK}])(<)(${ANS})([^>]*)(>)`);
+		p = new RegExp(`([${ANS}])(<)(${CJK})([^>]*)(>)`); */
+		let meta1 = this.meta1;
+		let meta2 = this.meta2;
+		let group1 = this.group1;
+		let group2 = this.group2;
+		text = text.replace(new RegExp(`(${meta1})([^${meta1}]*)` + group1 + `(${meta2})` + group2, "g"), '$3 $4');
+		text = text.replace(new RegExp(`(${meta1})([^${meta1}]*)` + group2 + `(${meta2})` + group1, "g"), '$3 $4');
+		text = text.replace(new RegExp(group1 + `(${meta1})` + group2 + `([^${meta2}]*)(${meta2})`, "g"), '$1 $2');
+		text = text.replace(new RegExp(group2 + `(${meta1})` + group1 + `([^${meta2}]*)(${meta2})`, "g"), '$1 $2');
+		return text;
+	}
+	/* 
+	(【...)({CJK})(】（...）)({ANS})
+	(【...)({ANS})(】（...）)({CJK})
+	({CJK})(【)({ANS})(...】（...）)
+	({ANS})(【)({CJK})(...】（...）)
+
+	(【...)({CJK})(】【...】)({ANS})
+	(【...)({ANS})(】【...】)({CJK})
+	({CJK})(【)({ANS})(...】【...】)
+	({ANS})(【)({CJK})(...】【...】)
+	*/
+}
+
+class SpecialMetaMatcher extends Watcher {
+	constructor(group1, group2, metaGroup, meta){
+		super(group1, group2);
+		this.metaGroup = metaGroup;
+		this.meta = meta;
+	}
+
+	addSpace(text){
+		let meta = this.meta;
+		let group1 = this.group1;
+		let group2 = this.group2;
+		let metaGroup = this.metaGroup;
+
+		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group1 + metaGroup + group2, "g"), '$3 $4');
+		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group2 + metaGroup + group1, "g"), '$3 $4');
+		text = text.replace(new RegExp(group1 + metaGroup + group2 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
+		text = text.replace(new RegExp(group2 + metaGroup + group1 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
+		return text;
+	}
+}

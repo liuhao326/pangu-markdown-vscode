@@ -51,25 +51,25 @@
 					"default": false,
 					"description": "Covert \"\" and '' to 『』 and 「」"
 				},
-				"pangu-markdown-vscode.covert_tabs_to_whitespace": {
-					"type": "boolean",
-					"default": false,
-					"description": "Covert \\t to whitespace"
-				},
 				"pangu-markdown-vscode.delete_extra_blank_lines": {
 					"type": "boolean",
-					"default": true,
+					"default": false,
 					"description": "Replace multiple blank lines with one blank line"
 				},
 				"pangu-markdown-vscode.convert_fullwidthChars": {
 					"type": "boolean",
-					"default": true,
+					"default": false,
 					"description": "Convert fullwidth character to halfwidth character"
 				},
 				"pangu-markdown-vscode.convert_fullwidthNums": {
 					"type": "boolean",
 					"default": true,
 					"description": "Convert fullwidth number to halfwidth number"
+				},
+				"pangu-markdown-vscode.condense_punctuation": {
+					"type": "boolean",
+					"default": true,
+					"description": "Replace repeated punctuation marks with one"
 				}
 			}
 		}
