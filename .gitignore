@@ -2,3 +2,5 @@ node_modules
 .vscode-test
 .history
 *.vsix
+doc/TODO.md
+test/text.js
