@@ -29,10 +29,10 @@ module.exports = {
 
 class PanguFormatter {
 	constructor() {
-		this.config = vscode.workspace.getConfiguration('pangu-markdown-vscode')
-		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`
-		this.ANS = `a-zA-Z0-9`
-		
+		this.config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
+		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`;
+		this.ANS = `a-zA-Z0-9`;
+		this.fullwidthPunctuation = "，。、《》？『』「」；：【】｛｝—！＠￥％…（）";
 	};
 
 	// 获取可编辑文档的全部内容
@@ -80,8 +80,8 @@ class PanguFormatter {
 	/* 全角标点与其他字符之间不加空格 */
 	deleteSpaces(text) {
 		//全角标点与其他字符之间
-		let fullwidthPunctuation = "，。、《》？『』「」；∶【】｛｝—！＠￥％…（）"
-		text = text.replace(new RegExp(String.raw`(\s*)([${fullwidthPunctuation}])(\s*)`, "g"), '$2')
+		let fullwidthPunctuation = this.fullwidthPunctuation;
+		text = text.replace(new RegExp(String.raw`(\s*)([${fullwidthPunctuation}])(\s*)`, "g"), '$2');
 		// 去掉「`()[]{}<>'"`」: 前后多余的空格
 		text = text.replace(/\s+([\(\)\[\]\{\}<>'":])\s+/g, ' $1 ');
 
@@ -145,27 +145,44 @@ class PanguFormatter {
 	insertSpace(text) {
 		let CJK = this.CJK;
 		let ANS = this.ANS;
+		let config = this.config;
+		let fullwidthPunctuation = this.fullwidthPunctuation;
 
-		// 中文与英文、中文与数字之间
+		// 中文与英文、中文与数字之间（直接相邻）
 		text = new noMetaMatcher(`([${CJK}])`, `([${ANS}])`).addSpace(text);
 		// 中文与英文、中文与数字之间（考虑`）
-		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, "`", "(`)").addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, "`", "`").addSpace(text);
 		// 中文与英文、中文与数字之间（考虑*）
-		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`(\*\*\*)`).addSpace(text);
-		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`(\*\*)`).addSpace(text);
-		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`(\*)`).addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*\*\*`, String.raw`\*\*\*`).addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*\*`, String.raw`\*\*`).addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`\*`).addSpace(text);
 		// 中文与英文、中文与数字之间（考虑==）
-		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, `=`, `(==)`).addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `==`, `==`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑~~）
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `~~`, `~~`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑++）
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `++`, `++`).addSpace(text);
 		// 中文与英文、中文与数字之间（考虑_）
-		text = new SameMetaMatcher(`([${CJK}])`, `([${ANS}])`, `_`, `(_)`).addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `_`, `_`).addSpace(text);
 		// 中文与英文、中文与数字之间（考虑<>）
-		text = new DifferentMetaMatcher(`([${CJK}])`, `([${ANS}])`, `<`, `>`).addSpace(text);
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `<`, `>`).addSpace(text);
+		//（<u>）
+		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `<u>`, `</u>`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑[]()）
+		text = new LinkMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\[`, String.raw`\]`, String.raw`\(`, String.raw`\)`).addSpace(text);
+		// 中文与英文、中文与数字之间（考虑[][]）
+		text = new LinkMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\[`, String.raw`\]`, String.raw`\[`, String.raw`\]`).addSpace(text);
 
 		// 在单位之间
 		console.log("如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：度/百分比与数字之间不需要增加空格）。");
 
+		//行内代码
+		if(config.get('addSpace_for_code')){
+			text = text.replace(new RegExp(`(\`.*\`)(\s*)([^${fullwidthPunctuation})`, "g"), '$1 $3');
+			text = text.replace(new RegExp(`([^${fullwidthPunctuation})(\s*)(\`.*\`)`, "g"), '$1 $3');
+		}
 		// 在 「I said:it's a good news」的冒号与英文之间加入空格 「I said: it's a good news」
-		text = text.replace(/([:])\s*([a-zA-z])/g, "$1 $2");
+		text = new noMetaMatcher(`([a-zA-z]:)`, `([a-zA-z])`).addSpace(text);
 
 		//链接之间增加空格
 
@@ -353,34 +370,15 @@ class noMetaMatcher {
 	}
 
 	addSpace(text){
-		text = text.replace(new RegExp(this.group1 + this.group2, "g"), '$1 $2');
-		text = text.replace(new RegExp(this.group2 + this.group1, "g"), '$1 $2');
+		let space = String.raw`(\s*)`;
+		text = text.replace(new RegExp(this.group1 + space + this.group2, "g"), '$1 $3');
+		text = text.replace(new RegExp(this.group2 + space + this.group1, "g"), '$1 $3');
 		return text;
 	}
 }
 
-class SameMetaMatcher extends noMetaMatcher {
-	constructor(group1, group2, meta, metaGroup){
-		super(group1, group2);
-		this.meta = meta;
-		this.metaGroup1 = metaGroup;
-	}
-
-	addSpace(text){
-		let meta = this.meta;
-		let group1 = this.group1;
-		let group2 = this.group2;
-		let metaGroup = this.metaGroup;
-
-		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group1 + metaGroup + group2, "g"), '$3 $4');
-		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group2 + metaGroup + group1, "g"), '$3 $4');
-		text = text.replace(new RegExp(group1 + metaGroup + group2 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
-		text = text.replace(new RegExp(group2 + metaGroup + group1 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
-		return text;
-	}
-}
-
-class DifferentMetaMatcher extends noMetaMatcher {
+class MetaMatcher extends noMetaMatcher {
+	
 	constructor(group1, group2, meta1, meta2){
 		super(group1, group2);
 		this.meta1 = meta1;
@@ -388,50 +386,49 @@ class DifferentMetaMatcher extends noMetaMatcher {
 	}
 
 	addSpace(text){
-		/* let p = new RegExp(`(<)([^<]*)([${CJK}])(>)(${ANS})`);
-		p = new RegExp(`(<)([^<]*)([${ANS}])(>)(${CJK})`);
-		p = new RegExp(`([${CJK}])(<)(${ANS})([^>]*)(>)`);
-		p = new RegExp(`([${ANS}])(<)(${CJK})([^>]*)(>)`); */
-		let meta1 = this.meta1;
-		let meta2 = this.meta2;
-		let group1 = this.group1;
-		let group2 = this.group2;
-		text = text.replace(new RegExp(`(${meta1})([^${meta1}]*)` + group1 + `(${meta2})` + group2, "g"), '$3 $4');
-		text = text.replace(new RegExp(`(${meta1})([^${meta1}]*)` + group2 + `(${meta2})` + group1, "g"), '$3 $4');
-		text = text.replace(new RegExp(group1 + `(${meta1})` + group2 + `([^${meta2}]*)(${meta2})`, "g"), '$1 $2');
-		text = text.replace(new RegExp(group2 + `(${meta1})` + group1 + `([^${meta2}]*)(${meta2})`, "g"), '$1 $2');
+		let m1 = this.meta1;
+		let m2 = this.meta2;
+		let g1 = this.group1;
+		let g2 = this.group2;
+		let space = String.raw`(\s*)`;
+		//(m1)(g1)(m2)(g2)
+		//(m1)(g2)(m2)(g1)
+		//(g1)(m1)(g2)(m2)
+		//(g2)(m1)(g1)(m2)
+		//?默认为内部不包含meta1和meta2；默认空白不会影响样式
+		text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g1 + `(${m2})` + space + g2, "g"), '$4 $6');
+		text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g2 + `(${m2})` + space + g1, "g"), '$4 $6');
+		text = text.replace(new RegExp(g1 + space + `(${m1})` + g2 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), '$1 $3');
+		text = text.replace(new RegExp(g2 + space + `(${m1})` + g1 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), '$1 $3');
 		return text;
 	}
-	/* 
-	(【...)({CJK})(】（...）)({ANS})
-	(【...)({ANS})(】（...）)({CJK})
-	({CJK})(【)({ANS})(...】（...）)
-	({ANS})(【)({CJK})(...】（...）)
-
-	(【...)({CJK})(】【...】)({ANS})
-	(【...)({ANS})(】【...】)({CJK})
-	({CJK})(【)({ANS})(...】【...】)
-	({ANS})(【)({CJK})(...】【...】)
-	*/
 }
 
-class SpecialMetaMatcher extends Watcher {
-	constructor(group1, group2, metaGroup, meta){
+class LinkMatcher extends Watcher {
+	constructor(group1, group2, meta1, meta2, meta3, meta4){
 		super(group1, group2);
-		this.metaGroup = metaGroup;
-		this.meta = meta;
+		this.meta1 = meta1;
+		this.meta2 = meta2;
+		this.meta3 = meta3;
+		this.meta4 = meta4;
 	}
 
 	addSpace(text){
-		let meta = this.meta;
-		let group1 = this.group1;
-		let group2 = this.group2;
-		let metaGroup = this.metaGroup;
+		let m1 = this.meta1;
+		let m2 = this.meta2;
+		let m3 = this.meta3;
+		let m4 = this.meta4;
+		let g1 = this.group1;
+		let g2 = this.group2;
 
-		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group1 + metaGroup + group2, "g"), '$3 $4');
-		text = text.replace(new RegExp(metaGroup + `([^${meta}]*)` + group2 + metaGroup + group1, "g"), '$3 $4');
-		text = text.replace(new RegExp(group1 + metaGroup + group2 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
-		text = text.replace(new RegExp(group2 + metaGroup + group1 + `([^${meta}]*)` + metaGroup, "g"), '$1 $2');
+		//?默认两种原符号都不包含
+		let repeate1 = `${m1}${m2}`;
+		let repeate2 = `${m3}${m4}`;
+		let space = String.raw`(\s*)`;
+		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g1 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + space + g2, "g"), '$6 $8');
+		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g2 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + space + g1, "g"), '$6 $8');
+		text = text.replace(new RegExp(g2 + space + `(${m1})` + g1 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), '$1 $3');
+		text = text.replace(new RegExp(g1 + space + `(${m1})` + g2 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), '$1 $3');
 		return text;
 	}
 }
