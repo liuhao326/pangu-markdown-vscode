@@ -51,7 +51,7 @@ class PanguFormatter {
 
 				/* 全局操作 */
 				// 删除多余的换行
-				text = this.deleteExtraBlankLines(text);
+				text = this.condense(text);
 				// 全角数字 ——> 半角数字
 				text = this.replaceFullNums(text);
 				// 全角英文 ——> 半角英文
@@ -178,8 +178,7 @@ class PanguFormatter {
 
 		//行内代码
 		if(config.get('addSpace_for_code')){
-			text = text.replace(new RegExp(`(\`.*\`)(\s*)([^${fullwidthPunctuation})`, "g"), '$1 $3');
-			text = text.replace(new RegExp(`([^${fullwidthPunctuation})(\s*)(\`.*\`)`, "g"), '$1 $3');
+			text = new noMetaMatcher('(`[^`\r\n]*`)', `([^${fullwidthPunctuation})`).addSpace(text);
 		}
 		// 在 「I said:it's a good news」的冒号与英文之间加入空格 「I said: it's a good news」
 		text = new noMetaMatcher(`([a-zA-z]:)`, `([a-zA-z])`).addSpace(text);
@@ -189,17 +188,21 @@ class PanguFormatter {
 		return text;
 	};
 
-	/* 删除多余空行；tabs ——> 四个空格 */
-	deleteExtraBlankLines(text) {
+	/* 删除多余空行；去掉会被忽略的回车 */
+	condense(text) {
 		let config = this.config
-		// 删除超过2个的回车
-		// Unix 的只有 LF，Windows 的需要 CR LF
+		// 删除超过2个的回车（Unix 的只有 LF，Windows 的需要 CR LF）
 		if (config.get('delete_extra_blank_lines')) {
 			text = text.replace(/(\n){3,}/g, "$1$1");
 			text = text.replace(/(\r\n){3,}/g, "$1$1");
 			//删除文档结尾处多余的换行
 			text = text.replace(/(\n){1,}$/g, '');
 			text = text.replace(/(\r\n){1,}$/g, '');
+		}
+		if (config.get('delete_LF_that_will_be_ignored')) {
+			//TODO
+			/* text = text.replace(/(\n){1}/g, "");
+			text = text.replace(/(\r\n){1}/g, ""); */
 		}
 		return text;
 	};
@@ -215,15 +218,35 @@ class PanguFormatter {
 		let config = this.config
 
 		// 半角标点 ——> 全角标点
-		text = text.replace(new RegExp(String.raw`([${CJK}])\.([^\.])`, "g"), '$1。$2');
-		text = text.replace(new RegExp(String.raw`([${CJK}])\?+`, "g"), '$1？');
-		text = text.replace(new RegExp(`([${CJK}])!+`, "g"), '$1！');
-		text = text.replace(new RegExp(`([${CJK}]),+`, "g"), '$1，');
-		text = text.replace(new RegExp(`([${CJK}]);+`, "g"), '$1；');
-		text = text.replace(new RegExp(`([${CJK}]):+`, "g"), '$1：');
-		text = text.replace(new RegExp(`([${CJK}])[-－–—]{2,}`, "g"), '$1——');
-		text = text.replace(new RegExp(`([${CJK}])～+`, "g"), '$1〜');
+		//。
+		let point = new PunctuationConverter(`([${CJK}])`, String.raw`([^\.])`, String.raw`(\s*\.\s*)`, `。`);
+		text = point.convert(text);
+		//？！，；：——
+		let normal = new PunctuationConverter(`([${CJK}])`, String.raw`([\S\s])`);
+		normal.add(String.raw`(\s*\?+\s*)`, `？`);
+		normal.add(String.raw`(\s*!+\s*)`, `！`);
+		normal.add(String.raw`(\s*,+\s*)`, `，`);
+		normal.add(String.raw`(\s*;+\s*)`, `；`);
+		normal.add(String.raw`(\s*:+\s*)`, `：`);
+		normal.add(String.raw`(\s*[-－–—]{2,}\s*)`, `——`);
+		//〜
+		normal.add(String.raw`(\s*～+\s*)`, `〜`);
+		text = text.replace(/(~~)([\S\s]*)(~~)/g, `ꏝꏝ$2ꏝꏝ`);
+		text = normal.convert(text);
+		text = text().replace(/(ꏝꏝ)([\S\s]*)(ꏝꏝ)/g, `~~$2~~`);
+		//（）
+		/* [//]:#(哈哈我是最强注释，不会在浏览器中显示。)
+
+		[//]:<> (哈哈我是最强注释，不会在浏览器中显示。)
+
+		[comment]:<> (哈哈我是注释，不会在浏览器中显示。)
+
+		[]()
+
+		！[]() */
+		text = text.replace(/(\[)([^\[\]]*)(\]:)(\s*#+\s*)(\()([^\(\)]*)(\))/)
 		text = text.replace(new RegExp(String.raw`([^\]])(\()(.*)(\))`, "g"), '$1（$3）');
+		//“”
 		text = text.replace(new RegExp(`(")([ ${CJK}，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]*)(")`, "g"), '“$2”');
 
 		// >=3的句号或>=4的点号 ——> ......
@@ -429,6 +452,62 @@ class LinkMatcher extends Watcher {
 		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g2 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + space + g1, "g"), '$6 $8');
 		text = text.replace(new RegExp(g2 + space + `(${m1})` + g1 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), '$1 $3');
 		text = text.replace(new RegExp(g1 + space + `(${m1})` + g2 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), '$1 $3');
+		return text;
+	}
+}
+
+class PunctuationConverter {
+	constructor(group1, group2, punctuation1, punctuation2) {
+		this.pre = group1;
+		this.suf = group2;
+		if(punctuation1 && punctuation2){
+			this.punctuationNeedToConvert.push(punctuation1);
+			this.punctuationConvertTo.push(punctuation2);
+		}else{
+			this.punctuationNeedToConvert = [];
+			this.punctuationConvertTo = [];
+		}
+	}
+
+	add(punctuation1, punctuation2) {
+		this.punctuationNeedToConvert.push(punctuation1);
+		this.punctuationConvertTo.push(punctuation2);
+	}
+
+	convert(text) {
+		let pre = this.pre;
+		let suf = this.suf;
+		let punctuationNeedToConvert = this.punctuationNeedToConvert;
+		let punctuationConvertTo = this.punctuationConvertTo;
+		//(g1)(p)(g2)
+		for(let i=0,len=punctuationNeedToConvert.length; i<len; i++){
+			text = text.replace(
+				new RegExp(pre + `${punctuationNeedToConvert[i]}` + suf, "g"), `$1${punctuationConvertTo[i]}$3`);
+		}
+		return text;
+	}
+}
+
+class Ignorer {
+	//(?=(\$[0-9])|(?<=\$[0-9]))
+	constructor(pattern1, pattern2){
+		text = text.replace(/(~~)([\S\s]*)(~~)/g, `ꏝꏝ$2ꏝꏝ`);
+		text = normal.convert(text);
+		text = text().replace(/(ꏝꏝ)([\S\s]*)(ꏝꏝ)/g, `~~$2~~`);
+
+		this.p1 = pattern1;
+		this.p2 = pattern2;
+		this.p3 = pattern1.split(/((?<!\\)\()|(?<!\\)\))/g);
+		this.p4 = pattern2.split(/((?=\$[1-9][0-9]*)|(?<=\$[1-9][0-9]*))/g);
+	}
+
+	ignore(text){
+		text = text.replace(this.p1, this.p2);
+		return text;
+	}
+
+	recover(text){
+		text = text.replace(this.p3, this.p4);
 		return text;
 	}
 }
