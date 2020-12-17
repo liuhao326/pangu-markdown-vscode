@@ -32,7 +32,9 @@ class PanguFormatter {
 		this.config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
 		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`;
 		this.ANS = `a-zA-Z0-9`;
+		this.halfwidthChar = String.raw`\x00-\xff`;
 		this.fullwidthPunctuation = "，。、《》？『』「」；：【】｛｝—！＠￥％…（）";
+		this.inser = 'ꏝ';
 	};
 
 	// 获取可编辑文档的全部内容
@@ -214,70 +216,90 @@ class PanguFormatter {
 	不重复使用标点符号；
 	*/
 	replacePunctuation(text) {
-		let CJK = this.CJK;
+		let halfwidth = this.halfwidthChar;
 		let config = this.config
+		let textObj = new Text(text);
+		let inser = this.inser;
+		/* 半角标点 ——> 全角标点（。？！，；：——－-～（）“”‘’……《》） */
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\.\s*)([^\.])`, 'g'), '$1。$3');
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\?+\s*)([\S\s])`, 'g'), '$1？$3');
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\!+\s*)([\S\s])`, 'g'), '$1！$3');
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\,+\s*)([\S\s])`, 'g'), '$1，$3');
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\;+\s*)([\S\s])`, 'g'), '$1；$3');
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\:+\s*)([\S\s])`, 'g'), '$1：$3');
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*[-－–—]{2,}\s*)([\S\s])`, 'g'), '$1——$3');
+		//〜（似乎不那么必要）
+		textObj.replaceWithIgnore(new RegExp(String.raw`([^${halfwidth}])(\s*～+\s*)`, 'g'), `〜`,
+			[/~~((?!~~).)*~~/g, `${inser}${inser}$1${inser}${inser}`]);
+		//（） 需防止替换：[...]:#(注释)、[...]:<>(注释)、[]()、![]()
+		textObj.replaceWithIgnoreAll([[/\(/g, '（'], [/\)/g, '）']],
+			[/(\[[^\s\[\]][^\[\]]*\]:[\s]*([\S]*|<[.]*>)[\s]*)(\()(\.*)(\))/g, `$1${inser}$3${inser}`],
+			[/(\[.*\])(\()(.*)(\))/g,`$1${inser}$3${inser}`]
+		);
+		//“” 需防止替换：[GitHub](https://github.com "GitHub 官网")
+		textObj.replaceWithIgnore(new RegExp(String.raw`(\s*"\s*)([^${halfwidth}"][^"]*|[^"]*[^${halfwidth}"])(\s*"\s*)`,'g'),
+			'“$2”',{
+				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
+				ignoreReplacement: `$1${inser}$3${inser}$5`, 
+				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
+				recoverReplacement: `$1"$3"$5`
+		});
+		// ‘’
+		textObj.replaceWithIgnore(new RegExp(String.raw`(\s*'\s*)([^${halfwidth}'][^']*|[^']*[^${halfwidth}'])(\s*'\s*)`,'g'),
+			'‘$2’',{
+				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
+				ignoreReplacement: `$1${inser}$3${inser}$5`, 
+				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
+				recoverReplacement: `$1'$3'$5`
+		});
+		// ……
+		// 数量>=3的句号或数量>=4的点号 ——> ......
+		textObj.replace(/(。{3,}|\.{4,})/g, '......');
+		// 多字节字符后的多个点 ——> ……
+		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\.{3,})`, 'g'), '$……');
+		//《》«»
+		textObj.replace(new RegExp(String.raw`(\s*«\s*)([^${halfwidth}«»][^«»]*|[^«»]*[^${halfwidth}«»])(\s*»\s*)`,'g'), `《$2》`);
+		// 〈〉‹›
+		textObj.replace(new RegExp(String.raw`(\s*‹\s*)([^${halfwidth}‹›][^‹›]*|[^‹›]*[^${halfwidth}‹›])(\s*›\s*)`,'g'), `〈$2〉`);
 
-		// 半角标点 ——> 全角标点
-		//。
-		let point = new PunctuationConverter(`([${CJK}])`, String.raw`([^\.])`, String.raw`(\s*\.\s*)`, `。`);
-		text = point.convert(text);
-		//？！，；：——
-		let normal = new PunctuationConverter(`([${CJK}])`, String.raw`([\S\s])`);
-		normal.add(String.raw`(\s*\?+\s*)`, `？`);
-		normal.add(String.raw`(\s*!+\s*)`, `！`);
-		normal.add(String.raw`(\s*,+\s*)`, `，`);
-		normal.add(String.raw`(\s*;+\s*)`, `；`);
-		normal.add(String.raw`(\s*:+\s*)`, `：`);
-		normal.add(String.raw`(\s*[-－–—]{2,}\s*)`, `——`);
-		//〜
-		normal.add(String.raw`(\s*～+\s*)`, `〜`);
-		text = text.replace(/(~~)([\S\s]*)(~~)/g, `ꏝꏝ$2ꏝꏝ`);
-		text = normal.convert(text);
-		text = text().replace(/(ꏝꏝ)([\S\s]*)(ꏝꏝ)/g, `~~$2~~`);
-		//（）
-		/* [//]:#(哈哈我是最强注释，不会在浏览器中显示。)
 
-		[//]:<> (哈哈我是最强注释，不会在浏览器中显示。)
-
-		[comment]:<> (哈哈我是注释，不会在浏览器中显示。)
-
-		[]()
-
-		！[]() */
-		text = text.replace(/(\[)([^\[\]]*)(\]:)(\s*#+\s*)(\()([^\(\)]*)(\))/)
-		text = text.replace(new RegExp(String.raw`([^\]])(\()(.*)(\))`, "g"), '$1（$3）');
-		//“”
-		text = text.replace(new RegExp(`(")([ ${CJK}，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]*)(")`, "g"), '“$2”');
-
-		// >=3的句号或>=4的点号 ——> ......
-		text = text.replace(/(。{3,}|\.{4,})/g, '......');
-		// ?连续两个点号 ——> ...
+		// 多个标点符号 ——> 一个标点符号
 		if(config.get('condense_punctuation')){
-			// 多个标点符号 ——> 一个标点符号
-			text = text.replace(/(！？|？！|[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】])[⁇⁉⁈‽❗‼⸘\?\.;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】]+/g, '$1');
-			console.log("除省略号及两个连续的点号，重复的标点被替换为一个，如需要保留请自行更正。")
+			textObj.replace(/(！？|？！|[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】])\1+/g, '$1');
+			textObj.replace(/([⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、〖〗《》【】])[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、〖〗《》【】]+/g, '$1');
+			console.log("插件会将疑似重复的标点替换为一个，如需要保留请自行更正。")
 		}
-
+		// 中文引号 ——> 直角引号
 		if (config.get('covert_Chinese_quotations')) {
-			// 中文引号 ——> 直角引号
-			text = text.replace(/‘/g, "『");
-			text = text.replace(/’/g, "』");
-			text = text.replace(/“/g, "「");
-			text = text.replace(/”/g, "」");
+			textObj.replace(/‘/g, "『");
+			textObj.replace(/’/g, "』");
+			textObj.replace(/“/g, "「");
+			textObj.replace(/”/g, "」");
 		}
 		if(config.get('covert_English_quotations')){
 			// 英文引号 ——> 直角引号
-			text = text.replace(/(")([^"]*)(")/g, "「$2」")
-			text = text.replace(/(')([^']*)(')/g, "『$2』")
+			// ""
+			textObj.replaceWithIgnore(/(")([^"]*)(")/g, "「$2」",{
+				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
+				ignoreReplacement: `$1${inser}$3${inser}$5`, 
+				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
+				recoverReplacement: `$1"$3"$5`
+			});
+			// ''
+			textObj.replaceWithIgnore(/(')([^']*)(')/g, "『$2』",{
+				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
+				ignoreReplacement: `$1${inser}$3${inser}$5`, 
+				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
+				recoverReplacement: `$1'$3'$5`
+			});
 		}
 
 		/* 完整的英文整句、特殊名词，其内容使用半角标点 */
-		//TODO：实现替换对应字符而不需要自己输入
 		console.log("标点替换结束，下列操作需手动完成：")
-		console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^\w]|\s)(\w+)([^\w]|\s)`)
+		console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^${halfwidth}]|\s)(${halfwidth}+)([^${halfwidth}]|\s)`)
 		console.log(String.raw`2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\?~:!,\.'\"\-;\(\)\[\]\{\}]`)
 
-		return text;
+		return textObj.getText();
 	};
 
 	/* 全角数字 ——> 半角数字 */
@@ -362,7 +384,8 @@ class PanguFormatter {
 
 	/* 专有名词使用正确的大小写；不使用不地道的缩写 */
 	properNounsAndAbbreviations(){
-		console.log("如果文档中存在专有名词，请自行确认其大小写正确且没有使用不地道的缩写。")
+		console.log('对于专有名词和英文缩写：');
+		console.log("1. 如果文档中存在专有名词，请自行确认其大小写是否正确。\n2. 如果文档中使用了英文缩写，请自学确认缩写是否规范、通用。")
 	}
 };
 
@@ -456,58 +479,49 @@ class LinkMatcher extends Watcher {
 	}
 }
 
-class PunctuationConverter {
-	constructor(group1, group2, punctuation1, punctuation2) {
-		this.pre = group1;
-		this.suf = group2;
-		if(punctuation1 && punctuation2){
-			this.punctuationNeedToConvert.push(punctuation1);
-			this.punctuationConvertTo.push(punctuation2);
-		}else{
-			this.punctuationNeedToConvert = [];
-			this.punctuationConvertTo = [];
+class Text {
+	constructor(text){
+		this.text = text;
+	}
+
+	getText(){
+		return this.text;
+	}
+
+	replace(pattern, replacement){
+		this.text = this.text.replace(pattern, replacement);
+	}
+
+	replaceWithIgnore(pattern, replacement, ignorer){
+		this.originText = this.text;
+		this.ignoredText = this.text.replace(ignorer[0], ignorer[1]);
+		this.text = this.ignoredText.replace(pattern, replacement);
+		this.recover();
+	}
+
+	replaceWithIgnoreAll(repalcer, ...ignorer){
+		this.originText = this.text;
+		for (let index = 0; index < ignorer.length; index++) {
+			const element = ignorer[index];
+			this.ignoredText = this.ignoredText.replace(element[0], element[1]);
 		}
-	}
-
-	add(punctuation1, punctuation2) {
-		this.punctuationNeedToConvert.push(punctuation1);
-		this.punctuationConvertTo.push(punctuation2);
-	}
-
-	convert(text) {
-		let pre = this.pre;
-		let suf = this.suf;
-		let punctuationNeedToConvert = this.punctuationNeedToConvert;
-		let punctuationConvertTo = this.punctuationConvertTo;
-		//(g1)(p)(g2)
-		for(let i=0,len=punctuationNeedToConvert.length; i<len; i++){
-			text = text.replace(
-				new RegExp(pre + `${punctuationNeedToConvert[i]}` + suf, "g"), `$1${punctuationConvertTo[i]}$3`);
+		this.text = this.ignoredText;
+		for (let index = 0; index < repalcer.length; index++) {
+			const element = repalcer[index];
+			this.text = this.text.replace(element[0], element[1]);
 		}
-		return text;
-	}
-}
-
-class Ignorer {
-	//(?=(\$[0-9])|(?<=\$[0-9]))
-	constructor(pattern1, pattern2){
-		text = text.replace(/(~~)([\S\s]*)(~~)/g, `ꏝꏝ$2ꏝꏝ`);
-		text = normal.convert(text);
-		text = text().replace(/(ꏝꏝ)([\S\s]*)(ꏝꏝ)/g, `~~$2~~`);
-
-		this.p1 = pattern1;
-		this.p2 = pattern2;
-		this.p3 = pattern1.split(/((?<!\\)\()|(?<!\\)\))/g);
-		this.p4 = pattern2.split(/((?=\$[1-9][0-9]*)|(?<=\$[1-9][0-9]*))/g);
+		this.recover();
 	}
 
-	ignore(text){
-		text = text.replace(this.p1, this.p2);
-		return text;
-	}
-
-	recover(text){
-		text = text.replace(this.p3, this.p4);
-		return text;
+	recover(){
+		let origin = this.originText.split('');
+		let ignored = this.ignoredText.split('');
+		let text = this.text;
+		for (let index = 0; index < origin.length; index++) {
+			if(origin[index] != ignored[index]){
+				text = text.replace('ꏝ', origin[index]);
+			}
+		}
+		this.text = text;
 	}
 }
