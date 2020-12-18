@@ -216,10 +216,10 @@ class PanguFormatter {
 	不重复使用标点符号；
 	*/
 	replacePunctuation(text) {
-		let halfwidth = this.halfwidthChar;
-		let config = this.config
+		const halfwidth = this.halfwidthChar;
+		const config = this.config;
+		const inser = this.inser;
 		let textObj = new Text(text);
-		let inser = this.inser;
 		/* 半角标点 ——> 全角标点（。？！，；：——－-～（）“”‘’……《》） */
 		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\.\s*)([^\.])`, 'g'), '$1。$3');
 		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\?+\s*)([\S\s])`, 'g'), '$1？$3');
@@ -238,20 +238,16 @@ class PanguFormatter {
 		);
 		//“” 需防止替换：[GitHub](https://github.com "GitHub 官网")
 		textObj.replaceWithIgnore(new RegExp(String.raw`(\s*"\s*)([^${halfwidth}"][^"]*|[^"]*[^${halfwidth}"])(\s*"\s*)`,'g'),
-			'“$2”',{
-				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
-				ignoreReplacement: `$1${inser}$3${inser}$5`, 
-				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
-				recoverReplacement: `$1"$3"$5`
-		});
+			'“$2”',[
+				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
+				`$1${inser}$3${inser}$5`
+			]);
 		// ‘’
 		textObj.replaceWithIgnore(new RegExp(String.raw`(\s*'\s*)([^${halfwidth}'][^']*|[^']*[^${halfwidth}'])(\s*'\s*)`,'g'),
-			'‘$2’',{
-				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
-				ignoreReplacement: `$1${inser}$3${inser}$5`, 
-				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
-				recoverReplacement: `$1'$3'$5`
-		});
+			'‘$2’',[
+				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
+				`$1${inser}$3${inser}$5`
+			]);
 		// ……
 		// 数量>=3的句号或数量>=4的点号 ——> ......
 		textObj.replace(/(。{3,}|\.{4,})/g, '......');
@@ -276,22 +272,18 @@ class PanguFormatter {
 			textObj.replace(/“/g, "「");
 			textObj.replace(/”/g, "」");
 		}
+		// 英文引号 ——> 直角引号
 		if(config.get('covert_English_quotations')){
-			// 英文引号 ——> 直角引号
 			// ""
-			textObj.replaceWithIgnore(/(")([^"]*)(")/g, "「$2」",{
-				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
-				ignoreReplacement: `$1${inser}$3${inser}$5`, 
-				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
-				recoverReplacement: `$1"$3"$5`
-			});
+			textObj.replaceWithIgnore(/(")([^"]*)(")/g, "「$2」",[
+				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
+				`$1${inser}$3${inser}$5`
+			]);
 			// ''
-			textObj.replaceWithIgnore(/(')([^']*)(')/g, "『$2』",{
-				ignorePattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
-				ignoreReplacement: `$1${inser}$3${inser}$5`, 
-				recoverPattern: new RegExp(String.raw`(\[.*\]\(\S+.*\s)(${inser})(.*)(${inser})(\s*\))`,'g'), 
-				recoverReplacement: `$1'$3'$5`
-			});
+			textObj.replaceWithIgnore(/(')([^']*)(')/g, "『$2』",[
+				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
+				`$1${inser}$3${inser}$5`
+			]);
 		}
 
 		/* 完整的英文整句、特殊名词，其内容使用半角标点 */
@@ -492,34 +484,38 @@ class Text {
 		this.text = this.text.replace(pattern, replacement);
 	}
 
-	replaceWithIgnore(pattern, replacement, ignorer){
-		this.originText = this.text;
-		this.ignoredText = this.text.replace(ignorer[0], ignorer[1]);
-		this.text = this.ignoredText.replace(pattern, replacement);
-		this.recover();
+	insertStr(soure, start, newStr){   
+		return soure.slice(0, start) + newStr + soure.slice(start);
 	}
 
-	replaceWithIgnoreAll(repalcer, ...ignorer){
-		this.originText = this.text;
-		for (let index = 0; index < ignorer.length; index++) {
-			const element = ignorer[index];
-			this.ignoredText = this.ignoredText.replace(element[0], element[1]);
+	replaceWithIgnore(pattern, replacement, ignore){
+		this.beforeIgnoreText = this.text;
+		this.ignoredText = this.text.replace(ignore[0], ignore[1]);
+		this.text = this.ignoredText.replace(pattern, replacement);
+		this.recoverIgnore();
+	}
+
+	replaceWithIgnoreAll(repalceList, ...ignoreList){
+		this.beforeIgnoreText = this.text;
+		for (let index = 0; index < ignoreList.length; index++) {
+			const ignore = ignoreList[index];
+			this.ignoredText = this.ignoredText.replace(ignore[0], ignore[1]);
 		}
 		this.text = this.ignoredText;
-		for (let index = 0; index < repalcer.length; index++) {
-			const element = repalcer[index];
-			this.text = this.text.replace(element[0], element[1]);
+		for (let index = 0; index < repalceList.length; index++) {
+			const ignore = repalceList[index];
+			this.text = this.text.replace(ignore[0], ignore[1]);
 		}
-		this.recover();
+		this.recoverIgnore();
 	}
 
-	recover(){
-		let origin = this.originText.split('');
+	recoverIgnore(){
+		let beforeIgnore = this.beforeIgnoreText.split('');
 		let ignored = this.ignoredText.split('');
 		let text = this.text;
-		for (let index = 0; index < origin.length; index++) {
-			if(origin[index] != ignored[index]){
-				text = text.replace('ꏝ', origin[index]);
+		for (let index = 0; index < beforeIgnore.length; index++) {
+			if(beforeIgnore[index] != ignored[index]){
+				text = text.replace('ꏝ', beforeIgnore[index]);
 			}
 		}
 		this.text = text;
