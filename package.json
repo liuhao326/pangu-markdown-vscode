@@ -73,8 +73,13 @@
 				},
 				"pangu-markdown-vscode.addSpace_for_code": {
 					"type": "boolean",
-					"default": true,
+					"default": false,
 					"description": "Add spaces at both ends of the code（`）"
+				},
+				"pangu-markdown-vscode.addSpace_for_link": {
+					"type": "boolean",
+					"default": false,
+					"description": "Add spaces at both ends of the link（[...](...)）"
 				}
 			}
 		}
