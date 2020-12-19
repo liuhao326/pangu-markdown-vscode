@@ -27,13 +27,33 @@ module.exports = {
 	deactivate
 };
 
+class Watcher {
+	getConfig() {
+		this._config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
+	};
+	constructor() {
+		this.getConfig();
+		if (this._config.get('auto_format_on_save', false)) {
+			let subscriptions = [];
+			this._disposable = vscode.Disposable.from(...subscriptions);
+			vscode.workspace.onWillSaveTextDocument(this._onWillSaveDoc, this, subscriptions);
+		};
+	};
+	dispose() {
+		this._disposable.dispose();
+	};
+	_onWillSaveDoc(e) {
+		new PanguFormatter().updateDocument();
+	};
+};
+
 class PanguFormatter {
 	constructor() {
 		this.config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
 		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`;
-		this.ANS = `a-zA-Z0-9`;
+		this.ANS = String.raw`\w`;
 		this.halfwidthChar = String.raw`\x00-\xff`;
-		this.fullwidthPunctuation = "，。、《》？『』「」；：【】｛｝—！＠￥％…（）";
+		this.fullwidthPunctuation = "[，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]";
 		this.inser = 'ꏝ';
 	};
 
@@ -70,7 +90,7 @@ class PanguFormatter {
 					return line;
 				}).join("\n");
 
-				properNounsAndAbbreviations();
+				this.properNounsAndAbbreviations();
 
 				editorBuilder.replace(this.getDocRange(doc), text);
 			});
@@ -81,130 +101,72 @@ class PanguFormatter {
 
 	/* 全角标点与其他字符之间不加空格 */
 	deleteSpaces(text) {
-		//全角标点与其他字符之间
+		//全角标点与其他字符之间（注意避免替换掉语法空格）
 		let fullwidthPunctuation = this.fullwidthPunctuation;
-		text = text.replace(new RegExp(String.raw`(\s*)([${fullwidthPunctuation}])(\s*)`, "g"), '$2');
-		// 去掉「`()[]{}<>'"`」: 前后多余的空格
-		text = text.replace(/\s+([\(\)\[\]\{\}<>'":])\s+/g, ' $1 ');
+		text = text.replace(new RegExp(String.raw`(?<![-*]|\d.|- \[ \]|)(\s*)([${fullwidthPunctuation}])(\s*)`, "g"), '$2');
 
-		// 去掉连续括号增加的空格，例如：「` ( [ { <  > } ] ) `」
-		text = text.replace(/([<\(\{\[])\s([<\(\{\[])\s/g, "$1$2 ");
-		text = text.replace(/([<\(\{\[])\s([<\(\{\[])\s/g, "$1$2 ");
-		text = text.replace(/([<\(\{\[])\s([<\(\{\[])\s/g, "$1$2 ");
-		text = text.replace(/([<\(\{\[])\s([<\(\{\[])\s/g, "$1$2 ");
-		text = text.replace(/\s([>\)\]\}])\s([>\)\]\}])/g, " $1$2");
-		text = text.replace(/\s([>\)\]\}])\s([>\)\]\}])/g, " $1$2");
-		text = text.replace(/\s([>\)\]\}])\s([>\)\]\}])/g, " $1$2");
-		text = text.replace(/\s([>\)\]\}])\s([>\)\]\}])/g, " $1$2");
-
-		// 去掉 「`$ () $`」, 「`$ [] $`」, 「`$ {} $`」 里面增加的空格
-		// 去掉开始 $ 后面增加的空格，结束 $ 前面增加的空格
-		// 去掉包裹代码的符号里面增加的空格
-		// 去掉开始 ` 后面增加的空格，结束 ` 前面增加的空格
-		text = text.replace(/([`\$])\s*([<\(\[\{])([^\$]*)\s*([`\$])/g, "$1$2$3$4");
-		text = text.replace(/([`\$])\s*([^\$]*)([>\)\]\}])\s*([`\$])/g, "$1$2$3$4");
-
-		// 去掉「`) _`」、「`) ^`」增加的空格
-		text = text.replace(/\)\s([_\^])/g, ")$1");
-
-		// 去掉 [^footnote,2002] 中的空格
-		text = text.replace(/\[\s*\^([^\]\s]*)\s*\]/g, "[^$1]");
-
-		// 将链接的格式中文括号“[]（）”改成英文括号“[]()”，去掉增加的空格
-		text = text.replace(/\s*\[\s*([^\]]+)\s*\]\s*[（(]\s*([^\s\)]*)\s*[)）]\s*/g, " [$1]($2) ");
-
-		// 将图片链接的格式中的多余空格“! []()”去掉，变成“![]()”
-		text = text.replace(/!\s*\[\s*([^\]]+)\s*\]\s*[（(]\s*([^\s\)]*)\s*[)）]\s*/g, "![$1]($2) ");
-
-		// 将网络地址中“ : // ”符号改成“://”
-		text = text.replace(/\s*:\s*\/\s*\/\s*/g, "://");
+		// 去掉行内代码两端多余的空格
+		text = text.replace(/(`)(\s*)([^`]*)(\s*)(`)/, '$1$3$5');
 
 		// 去掉行末空格
-		text = text.replace(/(\S*)\s*$/g, '$1');
+		text = text.replace(/(\S)\s*$/g, '$1');
 
 		// 去掉「123 °」和 「15 %」中的空格
 		text = text.replace(/([0-9])\s*([°%])/g, '$1$2');
-
-		// 去掉 2020 - 04 - 20, 08 : 00 : 00 这种日期时间表示的数字内的空格
-		text = text.replace(/([0-9])\s*-\s*([0-9])/g, "$1-$2");
-		text = text.replace(/([0-9])\s*:\s*([0-9])/g, "$1:$2");
-
-		// 去掉 1 , 234 , 567 这种千分位表示的数字内的空格
-		text = text.replace(/([0-9])\s*,\s*([0-9])/g, "$1,$2");
-
-		// 全角標點與其他字符之間不加空格
-		// 将无序列表的-后面的空格保留
-		// 将有序列表的-后面的空格保留
-		text = text.replace(/^(?<![-|\d.]\s*)\s*([，。、《》？『』「」；∶【】｛｝—！＠￥％…（）])\s*/g, "$1");
 		return text;
 	};
 
 	/* 
 	中英文之间（「豆瓣FM」等产品名词，按照官方所定义的格式书写）；
 	中文与数字之间；
-	数字与单位之间（度 / 百分比与数字之间不需要增加空格。）；
-	链接之间增加空格（争议） */
+	英文标点与英文之间；
+	数字与单位之间（°/%与数字之间不需要增加空格。）；
+	短代码之间添加空格（争议）；
+	链接之间增加空格（争议）
+	 */
 	insertSpace(text) {
 		let CJK = this.CJK;
 		let ANS = this.ANS;
 		let config = this.config;
 		let fullwidthPunctuation = this.fullwidthPunctuation;
+		let textObj = new Text(text);
 
-		// 中文与英文、中文与数字之间（直接相邻）
-		text = new noMetaMatcher(`([${CJK}])`, `([${ANS}])`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑`）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, "`", "`").addSpace(text);
-		// 中文与英文、中文与数字之间（考虑*）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*\*\*`, String.raw`\*\*\*`).addSpace(text);
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*\*`, String.raw`\*\*`).addSpace(text);
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\*`, String.raw`\*`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑==）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `==`, `==`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑~~）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `~~`, `~~`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑++）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `++`, `++`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑_）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `_`, `_`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑<>）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `<`, `>`).addSpace(text);
-		//（<u>）
-		text = new MetaMatcher(`([${CJK}])`, `([${ANS}])`, `<u>`, `</u>`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑[]()）
-		text = new LinkMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\[`, String.raw`\]`, String.raw`\(`, String.raw`\)`).addSpace(text);
-		// 中文与英文、中文与数字之间（考虑[][]）
-		text = new LinkMatcher(`([${CJK}])`, `([${ANS}])`, String.raw`\[`, String.raw`\]`, String.raw`\[`, String.raw`\]`).addSpace(text);
-
-		// 在单位之间
-		console.log("如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：度/百分比与数字之间不需要增加空格）。");
-
-		//行内代码
+		// 中文与英文、中文与数字之间
+		textObj.addSpace(`([${CJK}])`, `([${ANS}])`, true);
+		
+		// 行内代码
 		if(config.get('addSpace_for_code')){
-			text = new noMetaMatcher('(`[^`\r\n]*`)', `([^${fullwidthPunctuation})`).addSpace(text);
+			textObj.addSpace('(`[^`\r\n]*`)', `([^${fullwidthPunctuation})`, true);
 		}
-		// 在 「I said:it's a good news」的冒号与英文之间加入空格 「I said: it's a good news」
-		text = new noMetaMatcher(`([a-zA-z]:)`, `([a-zA-z])`).addSpace(text);
+		// 英文标点与英文之间
+		textObj.addSpace(String.raw`([.,:;!?]|\.\.\.)`, String.raw`([\w])`, true, true);
 
-		//链接之间增加空格
+		// 链接之间增加空格
+		textObj.addSpace(String.raw`\[[^\[\]]*\]\([^\(\)]*\)`, String.raw`[\S]`, true);
 
-		return text;
+		// 产品名词
+		console.log('空白添加完毕，下列操作需手动完成：')
+		console.log('1. 「豆瓣FM」等产品名词应按照官方所定义的格式书写，插件可能错误地为其添加了空格，请自行检查；')
+		// 在单位之间
+		console.log("2. 如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：单位为 ° 或 % 时不需要增加空格）。");
+		return textObj.getText();
 	};
 
 	/* 删除多余空行；去掉会被忽略的回车 */
 	condense(text) {
 		let config = this.config
-		// 删除超过2个的回车（Unix 的只有 LF，Windows 的需要 CR LF）
+		// 删除超过 2 个的回车（Unix 的只有 LF，Windows 的需要 CR LF）
 		if (config.get('delete_extra_blank_lines')) {
 			text = text.replace(/(\n){3,}/g, "$1$1");
 			text = text.replace(/(\r\n){3,}/g, "$1$1");
-			//删除文档结尾处多余的换行
+			// 删除文档结尾处多余的换行
 			text = text.replace(/(\n){1,}$/g, '');
 			text = text.replace(/(\r\n){1,}$/g, '');
 		}
 		if (config.get('delete_LF_that_will_be_ignored')) {
-			//TODO
-			/* text = text.replace(/(\n){1}/g, "");
-			text = text.replace(/(\r\n){1}/g, ""); */
+			// TODO
+			/* text = text.replace(/(?<!\n)\n^\s*(?!-|\*|- []|[0-9]*\.)\s/g, "");
+			text = text.replace(/\r\n^/g, ""); */
 		}
 		return text;
 	};
@@ -221,42 +183,58 @@ class PanguFormatter {
 		const inser = this.inser;
 		let textObj = new Text(text);
 		/* 半角标点 ——> 全角标点（。？！，；：——－-～（）“”‘’……《》） */
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\.\s*)([^\.])`, 'g'), '$1。$3');
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\?+\s*)([\S\s])`, 'g'), '$1？$3');
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\!+\s*)([\S\s])`, 'g'), '$1！$3');
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\,+\s*)([\S\s])`, 'g'), '$1，$3');
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\;+\s*)([\S\s])`, 'g'), '$1；$3');
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*\:+\s*)([\S\s])`, 'g'), '$1：$3');
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\s*[-－–—]{2,}\s*)([\S\s])`, 'g'), '$1——$3');
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`([^.])`,
+		String.raw`(\s*\.\s*)`, '。', true, true);
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		String.raw`(\s*\?+\s*)`, '？', true, true);
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		String.raw`(\s*\!+\s*)`, '！', true, true);
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		String.raw`(\s*\,+\s*)`, '，', true, true);
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		String.raw`(\s*\;+\s*)`, '；', true, true);
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		String.raw`(\s*\:+\s*)`, '：', true, true);
+		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		String.raw`(\s*[-－–—]{2,}\s*)`, '——', true, true);
 		//〜（似乎不那么必要）
-		textObj.replaceWithIgnore(new RegExp(String.raw`([^${halfwidth}])(\s*～+\s*)`, 'g'), `〜`,
-			[/~~((?!~~).)*~~/g, `${inser}${inser}$1${inser}${inser}`]);
+		textObj.replaceWithIgnore(
+			new RegExp(String.raw`([^${halfwidth}])(\s*～+\s*)`, 'g'), `〜`,
+			[/~~((?!~~).)*~~/g, `${inser}${inser}$1${inser}${inser}`]
+		);
 		//（） 需防止替换：[...]:#(注释)、[...]:<>(注释)、[]()、![]()
-		textObj.replaceWithIgnoreAll([[/\(/g, '（'], [/\)/g, '）']],
+		textObj.replaceWithIgnoreAll(
+			[[/\(/g, '（'], [/\)/g, '）']],
 			[/(\[[^\s\[\]][^\[\]]*\]:[\s]*([\S]*|<[.]*>)[\s]*)(\()(\.*)(\))/g, `$1${inser}$3${inser}`],
 			[/(\[.*\])(\()(.*)(\))/g,`$1${inser}$3${inser}`]
 		);
 		//“” 需防止替换：[GitHub](https://github.com "GitHub 官网")
-		textObj.replaceWithIgnore(new RegExp(String.raw`(\s*"\s*)([^${halfwidth}"][^"]*|[^"]*[^${halfwidth}"])(\s*"\s*)`,'g'),
-			'“$2”',[
-				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
+		textObj.replaceWithIgnore(
+			new RegExp(String.raw`(\s*"\s*)([^${halfwidth}"][^"]*|[^"]*[^${halfwidth}"])(\s*"\s*)`,'g'),'“$2”',
+			[
+				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'),
 				`$1${inser}$3${inser}$5`
-			]);
+			]
+		);
 		// ‘’
-		textObj.replaceWithIgnore(new RegExp(String.raw`(\s*'\s*)([^${halfwidth}'][^']*|[^']*[^${halfwidth}'])(\s*'\s*)`,'g'),
-			'‘$2’',[
+		textObj.replaceWithIgnore(
+			new RegExp(String.raw`(\s*'\s*)([^${halfwidth}'][^']*|[^']*[^${halfwidth}'])(\s*'\s*)`,'g'),'‘$2’',
+			[
 				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
 				`$1${inser}$3${inser}$5`
-			]);
+			]
+		);
 		// ……
 		// 数量>=3的句号或数量>=4的点号 ——> ......
 		textObj.replace(/(。{3,}|\.{4,})/g, '......');
 		// 多字节字符后的多个点 ——> ……
 		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\.{3,})`, 'g'), '$……');
-		//《》«»
-		textObj.replace(new RegExp(String.raw`(\s*«\s*)([^${halfwidth}«»][^«»]*|[^«»]*[^${halfwidth}«»])(\s*»\s*)`,'g'), `《$2》`);
-		// 〈〉‹›
-		textObj.replace(new RegExp(String.raw`(\s*‹\s*)([^${halfwidth}‹›][^‹›]*|[^‹›]*[^${halfwidth}‹›])(\s*›\s*)`,'g'), `〈$2〉`);
+		// «» ——>《》
+		textObj.replace(
+			new RegExp(String.raw`(\s*«\s*)([^${halfwidth}«»][^«»]*|[^«»]*[^${halfwidth}«»])(\s*»\s*)`,'g'), `《$2》`);
+		// ‹› ——>〈〉
+		textObj.replace(
+			new RegExp(String.raw`(\s*‹\s*)([^${halfwidth}‹›][^‹›]*|[^‹›]*[^${halfwidth}‹›])(\s*›\s*)`,'g'), `〈$2〉`);
 
 
 		// 多个标点符号 ——> 一个标点符号
@@ -381,68 +359,52 @@ class PanguFormatter {
 	}
 };
 
-class Watcher {
-	getConfig() {
-		this._config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
-	};
-	constructor() {
-		this.getConfig();
-		if (this._config.get('auto_format_on_save', false)) {
-			let subscriptions = [];
-			this._disposable = vscode.Disposable.from(...subscriptions);
-			vscode.workspace.onWillSaveTextDocument(this._onWillSaveDoc, this, subscriptions);
-		};
-	};
-	dispose() {
-		this._disposable.dispose();
-	};
-	_onWillSaveDoc(e) {
-		new PanguFormatter().updateDocument();
-	};
-};
-
-class noMetaMatcher {
-	constructor(group1, group2){
+class noMeta {
+	constructor(group1, group2, oneSide){
 		this.group1 = group1;
 		this.group2 = group2;
+		this.oneSide = oneSide;
 	}
 
 	addSpace(text){
-		let space = String.raw`(\s*)`;
-		text = text.replace(new RegExp(this.group1 + space + this.group2, "g"), '$1 $3');
-		text = text.replace(new RegExp(this.group2 + space + this.group1, "g"), '$1 $3');
+		text = this.replaceMid(text, String.raw`(\s*)`, ' ');
+		return text;
+	}
+
+	replaceMid(text, needTo, replaceTo){
+		text = text.replace(new RegExp(this.group1 + needTo + this.group2, "g"), `$1${replaceTo}$3`);
+		if (!this.oneSide) {
+			text = text.replace(new RegExp(this.group2 + needTo + this.group1, "g"), `$1${replaceTo}$3`);
+		}
 		return text;
 	}
 }
 
-class MetaMatcher extends noMetaMatcher {
+class withMeta extends noMeta {
 	
-	constructor(group1, group2, meta1, meta2){
-		super(group1, group2);
+	constructor(group1, group2, oneSide, meta1, meta2){
+		super(group1, group2, oneSide);
 		this.meta1 = meta1;
 		this.meta2 = meta2;
 	}
 
-	addSpace(text){
+	replaceMid(text, needTo, replaceTo){
 		let m1 = this.meta1;
 		let m2 = this.meta2;
 		let g1 = this.group1;
 		let g2 = this.group2;
-		let space = String.raw`(\s*)`;
-		//(m1)(g1)(m2)(g2)
-		//(m1)(g2)(m2)(g1)
-		//(g1)(m1)(g2)(m2)
-		//(g2)(m1)(g1)(m2)
 		//?默认为内部不包含meta1和meta2；默认空白不会影响样式
-		text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g1 + `(${m2})` + space + g2, "g"), '$4 $6');
-		text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g2 + `(${m2})` + space + g1, "g"), '$4 $6');
-		text = text.replace(new RegExp(g1 + space + `(${m1})` + g2 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), '$1 $3');
-		text = text.replace(new RegExp(g2 + space + `(${m1})` + g1 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), '$1 $3');
+		text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g1 + `(${m2})` + needTo + g2, "g"), `$4${replaceTo}$6`);
+		text = text.replace(new RegExp(g1 + needTo + `(${m1})` + g2 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), `$1${replaceTo}$3`);
+		if(!this.oneSide){
+			text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g2 + `(${m2})` + needTo + g1, "g"), `$4${replaceTo}$6`);
+			text = text.replace(new RegExp(g2 + needTo + `(${m1})` + g1 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), `$1${replaceTo}$3`);
+		}
 		return text;
 	}
 }
 
-class LinkMatcher extends Watcher {
+class withLink extends noMeta {
 	constructor(group1, group2, meta1, meta2, meta3, meta4){
 		super(group1, group2);
 		this.meta1 = meta1;
@@ -451,7 +413,7 @@ class LinkMatcher extends Watcher {
 		this.meta4 = meta4;
 	}
 
-	addSpace(text){
+	replaceMid(text, needTo, replaceTo){
 		let m1 = this.meta1;
 		let m2 = this.meta2;
 		let m3 = this.meta3;
@@ -459,14 +421,13 @@ class LinkMatcher extends Watcher {
 		let g1 = this.group1;
 		let g2 = this.group2;
 
-		//?默认两种原符号都不包含
+		//?默认两种元字符都不包含
 		let repeate1 = `${m1}${m2}`;
 		let repeate2 = `${m3}${m4}`;
-		let space = String.raw`(\s*)`;
-		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g1 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + space + g2, "g"), '$6 $8');
-		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g2 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + space + g1, "g"), '$6 $8');
-		text = text.replace(new RegExp(g2 + space + `(${m1})` + g1 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), '$1 $3');
-		text = text.replace(new RegExp(g1 + space + `(${m1})` + g2 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), '$1 $3');
+		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g1 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + needTo + g2, "g"), `$6${replaceTo}$8`);
+		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g2 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + needTo + g1, "g"), `$6${replaceTo}$8`);
+		text = text.replace(new RegExp(g2 + needTo + `(${m1})` + g1 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), `$1${replaceTo}$3`);
+		text = text.replace(new RegExp(g1 + needTo + `(${m1})` + g2 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), `$1${replaceTo}$3`);
 		return text;
 	}
 }
@@ -482,10 +443,6 @@ class Text {
 
 	replace(pattern, replacement){
 		this.text = this.text.replace(pattern, replacement);
-	}
-
-	insertStr(soure, start, newStr){   
-		return soure.slice(0, start) + newStr + soure.slice(start);
 	}
 
 	replaceWithIgnore(pattern, replacement, ignore){
@@ -517,6 +474,49 @@ class Text {
 			if(beforeIgnore[index] != ignored[index]){
 				text = text.replace('ꏝ', beforeIgnore[index]);
 			}
+		}
+		this.text = text;
+	}
+
+	addSpace(group1, group2, considerMeta, oneSide){
+		this.replaceMid(group1, group2, String.raw`(\s*)`, ' ', considerMeta, oneSide);
+	}
+
+	replaceMid(group1, group2, needTo, replaceTo, considerMeta, oneSide){
+		let text = this.text;
+		if (considerMeta) {
+			let matchers = [];
+			// （直接相邻）
+			matchers.push(new noMeta(group1, group2, oneSide))
+			// （考虑`）
+			matchers.push(new withMeta(group1, group2, oneSide, "`", "`"));
+			// （考虑*）
+			matchers.push(new withMeta(group1, group2, oneSide, String.raw`\*\*\*`, String.raw`\*\*\*`));
+			matchers.push(new withMeta(group1, group2, oneSide, String.raw`\*\*`, String.raw`\*\*`));
+			matchers.push(new withMeta(group1, group2, oneSide, String.raw`\*`, String.raw`\*`));
+			// （考虑==）
+			matchers.push(new withMeta(group1, group2, oneSide, `==`, `==`));
+			// （考虑~~）
+			matchers.push(new withMeta(group1, group2, oneSide, `~~`, `~~`));
+			// （考虑++）
+			matchers.push(new withMeta(group1, group2, oneSide, `++`, `++`));
+			// （考虑_）
+			matchers.push(new withMeta(group1, group2, oneSide, `_`, `_`));
+			// （考虑<>）
+			matchers.push(new withMeta(group1, group2, oneSide, `<`, `>`));
+			// （考虑<u>）
+			matchers.push(new withMeta(group1, group2, oneSide, `<u>`, `</u>`));
+			// （考虑[]()）
+			matchers.push(new withLink(group1, group2, String.raw`\[`, String.raw`\]`, String.raw`\(`, String.raw`\)`));
+			// （考虑[][]）
+			matchers.push(new withLink(group1, group2, String.raw`\[`, String.raw`\]`, String.raw`\[`, String.raw`\]`));
+
+			for (let index = 0; index < matchers.length; index++) {
+				const matcher = matchers[index];
+				text = matcher.replaceMid(text, needTo, replaceTo);
+			}
+		} else {
+			text = text.replace(new RegExp(group1 + needTo + group2,'g'), `$1${replaceTo}$3`);
 		}
 		this.text = text;
 	}
