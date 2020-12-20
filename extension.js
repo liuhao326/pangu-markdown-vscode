@@ -9,6 +9,16 @@ const vscode = require('vscode');
  * 方法被激活时调用的函数
  */
 function activate(context) {
+	/* if(!wsPath){
+				vscode.window.showInformationMessage('建议在文件夹中打开文件以方便比较差异。是否打开文件夹？', Message).then(selection => {
+					if (selection === Message) {
+						let filePath = vscode.window.activeTextEditor.document.fileName;
+						let fileFolder = filePath.replace(/\/.*$/, '');
+						let uri = vscode.Uri.file(fileFolder);
+						vscode.commands.executeCommand('vscode.openFolder', uri);
+					}
+				});
+			} */
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "pangu-markdown-vscode" is now active!');
 	let format = vscode.commands.registerCommand('pangu-markdown-vscode.formatPangu', () => {
@@ -16,10 +26,25 @@ function activate(context) {
 		let doc = editor.getDoc();
 		if (doc.languageId === "markdown") {
 			vscode.window.activeTextEditor.edit((editorBuilder) => {
-				let text = doc.getText();
+				let originText = doc.getText();
 				let config = editor.getConfig('pangu-markdown-vscode');
-				text = new PanguFormatter(config).pangu(text);
-				editorBuilder.replace(editor.getDocRange(), text);
+				let newText = new PanguFormatter(config).pangu(originText);
+				editorBuilder.replace(editor.getDocRange(), newText);
+				const wsPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+				console.log(wsPath);
+				const Message = '确定';
+				vscode.window.showInformationMessage('处理完成，比较差异？', Message).then(selection => {
+					if (selection === Message) {
+						const wsedit = new vscode.WorkspaceEdit();
+						const filePath = vscode.Uri.file(wsPath + '/pangu-temp.md');
+						wsedit.createFile(filePath, { ignoreIfExists: true });
+						wsedit.insert(filePath, new vscode.Position(0, 0), originText);
+						vscode.workspace.applyEdit(wsedit);
+						let origin = filePath;
+						let newOne = vscode.Uri.file(vscode.window.activeTextEditor.document.fileName);
+						editor.diff(origin, newOne, 'originText —> newText');
+					}
+				});
 			});
 		} else {
 			vscode.window.showInformationMessage('不能处理非 Markdown 格式的文件。');
@@ -37,7 +62,7 @@ module.exports = {
 class Watcher {
 	constructor() {
 		let config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
-		if (config.get('auto_format_on_save', false)) {
+		if (config.get('autoFormatOnSave', false)) {
 			let subscriptions = [];
 			this._disposable = vscode.Disposable.from(...subscriptions);
 			vscode.workspace.onWillSaveTextDocument(this._onWillSaveDoc, this, subscriptions);
@@ -69,6 +94,10 @@ class Editor {
 	getConfig(extensionName){
 		return vscode.workspace.getConfiguration(extensionName);
 	}
+
+	diff(left, right, title){
+		vscode.commands.executeCommand('vscode.diff', left, right, title?title:undefined);
+	}
 }
 
 class PanguFormatter {
@@ -77,9 +106,9 @@ class PanguFormatter {
 		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`;
 		this.ANS = String.raw`\w`;
 		this.halfwidthChar = String.raw`\x00-\xff`;
-		this.fullwidthPunctuation = "[，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]";
+		this.fullwidthPunctuation = "，。、《》？『』「」；∶【】｛｝—！＠￥％…（）";
 		this.inser = 'ꏝ';
-		this.units = 'nm|um|mm|cm|dm|m|km'
+		this.units = config.get('units');
 	};
 
 
@@ -142,22 +171,20 @@ class PanguFormatter {
 		textObj.addSpace(`([${CJK}])`, `([${ANS}])`, true);
 		
 		// 行内代码
-		if(config.get('addSpace_for_code')){
+		if(config.get('addSpaceForCode')){
 			textObj.addSpace('(`[^`\r\n]*`)', `([^${fullwidthPunctuation})`, true);
 		}
 		// 英文标点与英文之间
-		// TODO：因容易影响到链接而暂时没有添加点号和冒号
-		textObj.addSpace(String.raw`([,;!?]|\.\.\.)`, String.raw`([\w])`, true, true);
+		// TODO：因容易影响到链接等内容而暂时没有添加点号、问号和冒号，(?<!http\s*|ftp\s*):
+		textObj.addSpace(String.raw`([,;!]|\.\.\.)`, String.raw`([\w])`, true, true);
 
 		// 链接之间增加空格
-		if(config.get('addSpace_for_link')){
+		if(config.get('addSpaceForLink')){
 			textObj.addSpace(String.raw`(\[[^\[\]]*\]\([^\(\)]*\))`, String.raw`([\S])`, true);
 		}
 
-		// 产品名词
-		//console.log('空白添加完毕，下列操作需手动完成：');
-		//console.log('1. 「豆瓣FM」等产品名词应按照官方所定义的格式书写，插件可能错误地为其添加了空格，请自行检查；');
-		//console.log("2. 如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：单位为 ° 或 % 时不需要增加空格）。");
+		// 产品名词（暂时打印）
+		
 		// 在单位之间
 		textObj.addSpace(`([0-9])`, `(${this.units})`, true, true);
 		return textObj.getText();
@@ -167,14 +194,14 @@ class PanguFormatter {
 	condense(text) {
 		let config = this.config
 		// 删除超过 2 个的回车（Unix 的只有 LF，Windows 的需要 CR LF）
-		if (config.get('delete_extra_blank_lines')) {
+		if (config.get('deleteExtraBlankLines')) {
 			text = text.replace(/(\n){3,}/g, "$1$1");
 			text = text.replace(/(\r\n){3,}/g, "$1$1");
 			// 删除文档结尾处多余的换行
 			text = text.replace(/(\n){1,}$/g, '');
 			text = text.replace(/(\r\n){1,}$/g, '');
 		}
-		if (config.get('delete_LF_that_will_be_ignored')) {
+		if (config.get('deleteLFThatWillBeIgnored')) {
 			// TODO
 			/* text = text.replace(/(?<!\n)\n^\s*(?!-|\*|- []|[0-9]*\.)\s/g, "");
 			text = text.replace(/\r\n^/g, ""); */
@@ -189,28 +216,28 @@ class PanguFormatter {
 	不重复使用标点符号；
 	*/
 	replacePunctuation(text) {
-		const halfwidth = this.halfwidthChar;
+		const halfwidthChar = this.halfwidthChar;
 		const config = this.config;
 		const inser = this.inser;
 		let textObj = new Text(text);
 		/* 半角标点 ——> 全角标点（。？！，；：——－-～（）“”‘’……《》） */
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`([^.])`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`([^.])`,
 		String.raw`(\s*\.\s*)`, '。', true, true);
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`(\S)`,
 		String.raw`(\s*\?+\s*)`, '？', true, true);
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`(\S)`,
 		String.raw`(\s*\!+\s*)`, '！', true, true);
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`(\S)`,
 		String.raw`(\s*\,+\s*)`, '，', true, true);
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`(\S)`,
 		String.raw`(\s*\;+\s*)`, '；', true, true);
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`(\S)`,
 		String.raw`(\s*\:+\s*)`, '：', true, true);
-		textObj.replaceMid(`([^${halfwidth}])`, String.raw`(\S)`,
+		textObj.replaceMid(`([^${halfwidthChar}])`, String.raw`(\S)`,
 		String.raw`(\s*[-－–—]{2,}\s*)`, '——', true, true);
 		//〜（似乎不那么必要）
 		textObj.replaceWithIgnore(
-			new RegExp(String.raw`([^${halfwidth}])(\s*～+\s*)`, 'g'), `〜`,
+			new RegExp(String.raw`([^${halfwidthChar}])(\s*～+\s*)`, 'g'), `〜`,
 			[/~~(((?!~~).)*)~~/g, `${inser}${inser}$1${inser}${inser}`]
 		);
 		//（） 需防止替换：[...]:#(注释)、[...]:<>(注释)、[]()、![]()
@@ -221,7 +248,7 @@ class PanguFormatter {
 		);
 		//“” 需防止替换：[GitHub](https://github.com "GitHub 官网")
 		textObj.replaceWithIgnore(
-			new RegExp(String.raw`(\s*"\s*)([^${halfwidth}"][^"]*|[^"]*[^${halfwidth}"])(\s*"\s*)`,'g'),'“$2”',
+			new RegExp(String.raw`(\s*"\s*)([^${halfwidthChar}"][^"]*|[^"]*[^${halfwidthChar}"])(\s*"\s*)`,'g'),'“$2”',
 			[
 				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'),
 				`$1${inser}$3${inser}$5`
@@ -229,7 +256,7 @@ class PanguFormatter {
 		);
 		// ‘’
 		textObj.replaceWithIgnore(
-			new RegExp(String.raw`(\s*'\s*)([^${halfwidth}'][^']*|[^']*[^${halfwidth}'])(\s*'\s*)`,'g'),'‘$2’',
+			new RegExp(String.raw`(\s*'\s*)([^${halfwidthChar}'][^']*|[^']*[^${halfwidthChar}'])(\s*'\s*)`,'g'),'‘$2’',
 			[
 				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(')(.*)(')(\s*\))`,'g'), 
 				`$1${inser}$3${inser}$5`
@@ -239,30 +266,29 @@ class PanguFormatter {
 		// 数量>=3的句号或数量>=4的点号 ——> ......
 		textObj.replace(/(。{3,}|\.{4,})/g, '......');
 		// 多字节字符后的多个点 ——> ……
-		textObj.replace(new RegExp(String.raw`([^${halfwidth}])(\.{3,})`, 'g'), '$……');
+		textObj.replace(new RegExp(String.raw`([^${halfwidthChar}])(\.{3,})`, 'g'), '$……');
 		// «» ——>《》
 		textObj.replace(
-			new RegExp(String.raw`(\s*«\s*)([^${halfwidth}«»][^«»]*|[^«»]*[^${halfwidth}«»])(\s*»\s*)`,'g'), `《$2》`);
+			new RegExp(String.raw`(\s*«\s*)([^${halfwidthChar}«»][^«»]*|[^«»]*[^${halfwidthChar}«»])(\s*»\s*)`,'g'), `《$2》`);
 		// ‹› ——>〈〉
 		textObj.replace(
-			new RegExp(String.raw`(\s*‹\s*)([^${halfwidth}‹›][^‹›]*|[^‹›]*[^${halfwidth}‹›])(\s*›\s*)`,'g'), `〈$2〉`);
+			new RegExp(String.raw`(\s*‹\s*)([^${halfwidthChar}‹›][^‹›]*|[^‹›]*[^${halfwidthChar}‹›])(\s*›\s*)`,'g'), `〈$2〉`);
 
 
 		// 多个标点符号 ——> 一个标点符号
-		if(config.get('condense_punctuation')){
+		if(config.get('condensePunctuation')){
 			textObj.replace(/(！？|？！|[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】])\1+/g, '$1');
 			textObj.replace(/([⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、〖〗《》【】])[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、〖〗《》【】]+/g, '$1');
-			//console.log("插件会将疑似重复的标点替换为一个，如需要保留请自行更正。")
 		}
 		// 中文引号 ——> 直角引号
-		if (config.get('covert_Chinese_quotations')) {
+		if (config.get('covertChineseQuotations')) {
 			textObj.replace(/‘/g, "『");
 			textObj.replace(/’/g, "』");
 			textObj.replace(/“/g, "「");
 			textObj.replace(/”/g, "」");
 		}
 		// 英文引号 ——> 直角引号
-		if(config.get('covert_English_quotations')){
+		if(config.get('covertEnglishQuotations')){
 			// ""
 			textObj.replaceWithIgnore(/(")([^"]*)(")/g, "「$2」",[
 				new RegExp(String.raw`(\[.*\]\(\S+.*\s)(")(.*)(")(\s*\))`,'g'), 
@@ -275,10 +301,8 @@ class PanguFormatter {
 			]);
 		}
 
-		/* 完整的英文整句、特殊名词，其内容使用半角标点 */
-		//console.log("标点替换结束，下列操作需手动完成：")
-		//console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^${halfwidth}]|\s)(${halfwidth}+)([^${halfwidth}]|\s)`)
-		//console.log(String.raw`2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\?~:!,\.'\"\-;\(\)\[\]\{\}]`)
+		/* 完整的英文整句、特殊名词，其内容使用半角标点（暂时打印） */
+		
 
 		return textObj.getText();
 	};
@@ -286,7 +310,7 @@ class PanguFormatter {
 	/* 全角数字 ——> 半角数字 */
 	replaceFullNums(text) {
 		let config = this.config
-		if(config.get('convert_fullwidthNums')){
+		if(config.get('convertFullwidthNums')){
 			" 全角数字。";
 			text = text.replace(/０/g, "0");
 			text = text.replace(/１/g, "1");
@@ -305,7 +329,7 @@ class PanguFormatter {
 	/* 全角字母 ——> 半角字母 */
 	replaceFullChars(text) {
 		let config = this.config
-		if(config.get('convert_fullwidthChars')){
+		if(config.get('convertFullwidthChars')){
 			" 全角字母。";
 			text = text.replace(/Ａ/g, "A");
 			text = text.replace(/Ｂ/g, "B");
@@ -365,11 +389,26 @@ class PanguFormatter {
 
 	/* 专有名词使用正确的大小写；不使用不地道的缩写 */
 	properNounsAndAbbreviations(){
-		//console.log('对于专有名词和英文缩写：');
-		//console.log("1. 如果文档中存在专有名词，请自行确认其大小写是否正确。\n2. 如果文档中使用了英文缩写，请自学确认缩写是否规范、通用。")
+		console.log('对于专有名词和英文缩写：');
+		console.log("1. 如果文档中存在专有名词，请自行确认其大小写是否正确。\n2. 如果文档中使用了英文缩写，请自学确认缩写是否规范、通用。")
 	}
 
-	log(){
+	log(text){
+		if(text){
+			console.log(text);
+			return;
+		}
+		let halfwidth = this.halfwidthChar;
+
+		console.log("下列有关标点的操作需手动完成：")
+		console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^${halfwidth}]|\s)(${halfwidth}+)([^${halfwidth}]|\s)`)
+		console.log(String.raw`2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\?~:!,\.'\"\-;\(\)\[\]\{\}]`)
+		console.log("另：插件会将疑似重复的标点替换为一个，如需要保留请自行更正。")
+
+		console.log('下列有关空白的操作需手动完成：');
+		console.log('1. 「豆瓣FM」等产品名词应按照官方所定义的格式书写，插件可能错误地为其添加了空格，请自行检查；');
+		console.log("2. 如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：单位为 ° 或 % 时不需要增加空格）。");
+		
 		this.properNounsAndAbbreviations();
 	}
 };
