@@ -12,28 +12,32 @@ function activate(context) {
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "pangu-markdown-vscode" is now active!');
 	let format = vscode.commands.registerCommand('pangu-markdown-vscode.formatPangu', () => {
-		new PanguFormatter().updateDocument();
+		let editor = new Editor();
+		let doc = editor.getDoc();
+		if (doc.languageId === "markdown") {
+			vscode.window.activeTextEditor.edit((editorBuilder) => {
+				let text = doc.getText();
+				let config = editor.getConfig('pangu-markdown-vscode');
+				text = new PanguFormatter(config).pangu(text);
+				editorBuilder.replace(editor.getDocRange(), text);
+			});
+		} else {
+			vscode.window.showInformationMessage('不能处理非 Markdown 格式的文件。');
+		};
 	});
 	context.subscriptions.push(format);
 	context.subscriptions.push(new Watcher());
 }
 exports.activate = activate;
 
-// 方法去激活时调用的函数
-function deactivate() { }
-
 module.exports = {
-	activate,
-	deactivate
+	activate
 };
 
 class Watcher {
-	getConfig() {
-		this._config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
-	};
 	constructor() {
-		this.getConfig();
-		if (this._config.get('auto_format_on_save', false)) {
+		let config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
+		if (config.get('auto_format_on_save', false)) {
 			let subscriptions = [];
 			this._disposable = vscode.Disposable.from(...subscriptions);
 			vscode.workspace.onWillSaveTextDocument(this._onWillSaveDoc, this, subscriptions);
@@ -42,61 +46,64 @@ class Watcher {
 	dispose() {
 		this._disposable.dispose();
 	};
-	_onWillSaveDoc(e) {
-		new PanguFormatter().updateDocument();
+	_onWillSaveDoc() {
+		new PanguFormatter().pangu();
 	};
 };
 
-class PanguFormatter {
-	constructor() {
-		this.config = vscode.workspace.getConfiguration('pangu-markdown-vscode');
-		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`;
-		this.ANS = String.raw`\w`;
-		this.halfwidthChar = String.raw`\x00-\xff`;
-		this.fullwidthPunctuation = "[，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]";
-		this.inser = 'ꏝ';
-	};
+class Editor {
 
-	// 获取可编辑文档的全部内容
-	getDocRange(doc) {
+	getDoc(){
+		let doc = vscode.window.activeTextEditor.document;
+		return doc;
+	}
+
+	getDocRange() {
+		let doc = vscode.window.activeTextEditor.document;
 		let start = new vscode.Position(0, 0);
 		let end = new vscode.Position(doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
 		let range = new vscode.Range(start, end);
 		return range;
 	};
 
-	updateDocument() {
-		let doc = vscode.window.activeTextEditor.document;
-		if (doc.languageId === "markdown") {
-			vscode.window.activeTextEditor.edit((editorBuilder) => {
-				let text = doc.getText(this.getDocRange(doc));
+	getConfig(extensionName){
+		return vscode.workspace.getConfiguration(extensionName);
+	}
+}
 
-				/* 全局操作 */
-				// 删除多余的换行
-				text = this.condense(text);
-				// 全角数字 ——> 半角数字
-				text = this.replaceFullNums(text);
-				// 全角英文 ——> 半角英文
-				text = this.replaceFullChars(text);
+class PanguFormatter {
+	constructor(config) {
+		this.config = config;
+		this.CJK = String.raw`\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\u3100-\u312f\u3200-\u32ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff`;
+		this.ANS = String.raw`\w`;
+		this.halfwidthChar = String.raw`\x00-\xff`;
+		this.fullwidthPunctuation = "[，。、《》？『』「」；∶【】｛｝—！＠￥％…（）]";
+		this.inser = 'ꏝ';
+		this.units = 'nm|um|mm|cm|dm|m|km'
+	};
 
-				/* 逐行处理 */
-				text = text.split("\n").map((line) => {
-					// 处理标点
-					line = this.replacePunctuation(line);
-					// 删除多余的空格
-					line = this.deleteSpaces(line);
-					// 插入必要的空格
-					line = this.insertSpace(line);
-					return line;
-				}).join("\n");
 
-				this.properNounsAndAbbreviations();
+	pangu(text) {
+		/* 全局操作 */
+		// 删除多余的换行
+		text = this.condense(text);
+		// 全角数字 ——> 半角数字
+		text = this.replaceFullNums(text);
+		// 全角英文 ——> 半角英文
+		text = this.replaceFullChars(text);
 
-				editorBuilder.replace(this.getDocRange(doc), text);
-			});
-		} else {
-			vscode.window.showInformationMessage('不能处理非 Markdown 格式的文件。');
-		};
+		/* 逐行处理 */
+		text = text.split("\n").map((line) => {
+			// 处理标点
+			line = this.replacePunctuation(line);
+			// 删除多余的空格
+			line = this.deleteSpaces(line);
+			// 插入必要的空格
+			line = this.insertSpace(line);
+			return line;
+		}).join("\n");
+		this.log();
+		return text;
 	};
 
 	/* 全角标点与其他字符之间不加空格 */
@@ -139,16 +146,20 @@ class PanguFormatter {
 			textObj.addSpace('(`[^`\r\n]*`)', `([^${fullwidthPunctuation})`, true);
 		}
 		// 英文标点与英文之间
-		textObj.addSpace(String.raw`([.,:;!?]|\.\.\.)`, String.raw`([\w])`, true, true);
+		// TODO：因容易影响到链接而暂时没有添加点号和冒号
+		textObj.addSpace(String.raw`([,;!?]|\.\.\.)`, String.raw`([\w])`, true, true);
 
 		// 链接之间增加空格
-		textObj.addSpace(String.raw`\[[^\[\]]*\]\([^\(\)]*\)`, String.raw`[\S]`, true);
+		if(config.get('addSpace_for_link')){
+			textObj.addSpace(String.raw`(\[[^\[\]]*\]\([^\(\)]*\))`, String.raw`([\S])`, true);
+		}
 
 		// 产品名词
-		console.log('空白添加完毕，下列操作需手动完成：')
-		console.log('1. 「豆瓣FM」等产品名词应按照官方所定义的格式书写，插件可能错误地为其添加了空格，请自行检查；')
+		//console.log('空白添加完毕，下列操作需手动完成：');
+		//console.log('1. 「豆瓣FM」等产品名词应按照官方所定义的格式书写，插件可能错误地为其添加了空格，请自行检查；');
+		//console.log("2. 如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：单位为 ° 或 % 时不需要增加空格）。");
 		// 在单位之间
-		console.log("2. 如果文档中存在用英文表示的单位，请自行在数字与单位之间添加空格（例外：单位为 ° 或 % 时不需要增加空格）。");
+		textObj.addSpace(`([0-9])`, `(${this.units})`, true, true);
 		return textObj.getText();
 	};
 
@@ -200,13 +211,13 @@ class PanguFormatter {
 		//〜（似乎不那么必要）
 		textObj.replaceWithIgnore(
 			new RegExp(String.raw`([^${halfwidth}])(\s*～+\s*)`, 'g'), `〜`,
-			[/~~((?!~~).)*~~/g, `${inser}${inser}$1${inser}${inser}`]
+			[/~~(((?!~~).)*)~~/g, `${inser}${inser}$1${inser}${inser}`]
 		);
 		//（） 需防止替换：[...]:#(注释)、[...]:<>(注释)、[]()、![]()
 		textObj.replaceWithIgnoreAll(
 			[[/\(/g, '（'], [/\)/g, '）']],
-			[/(\[[^\s\[\]][^\[\]]*\]:[\s]*([\S]*|<[.]*>)[\s]*)(\()(\.*)(\))/g, `$1${inser}$3${inser}`],
-			[/(\[.*\])(\()(.*)(\))/g,`$1${inser}$3${inser}`]
+			[/(\[[^\s\[\]][^\[\]]*\]:[\s]*([\S]*|<.*>)[\s]*)(\()(.*)(\))/g, `$1${inser}$4${inser}`],
+			[/(\[[^\[\]]*\])(\()([^\(\)]*)(\))/g,`$1${inser}$3${inser}`]
 		);
 		//“” 需防止替换：[GitHub](https://github.com "GitHub 官网")
 		textObj.replaceWithIgnore(
@@ -241,7 +252,7 @@ class PanguFormatter {
 		if(config.get('condense_punctuation')){
 			textObj.replace(/(！？|？！|[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、"'“”‘’「」『』〖〗《》【】])\1+/g, '$1');
 			textObj.replace(/([⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、〖〗《》【】])[⁇⁉⁈‽❗‼⸘\?;¿!¡·,！？。，；：、〖〗《》【】]+/g, '$1');
-			console.log("插件会将疑似重复的标点替换为一个，如需要保留请自行更正。")
+			//console.log("插件会将疑似重复的标点替换为一个，如需要保留请自行更正。")
 		}
 		// 中文引号 ——> 直角引号
 		if (config.get('covert_Chinese_quotations')) {
@@ -265,9 +276,9 @@ class PanguFormatter {
 		}
 
 		/* 完整的英文整句、特殊名词，其内容使用半角标点 */
-		console.log("标点替换结束，下列操作需手动完成：")
-		console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^${halfwidth}]|\s)(${halfwidth}+)([^${halfwidth}]|\s)`)
-		console.log(String.raw`2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\?~:!,\.'\"\-;\(\)\[\]\{\}]`)
+		//console.log("标点替换结束，下列操作需手动完成：")
+		//console.log(String.raw`1. 完整的英文整句、特殊名词，其内容建议使用半角标点。请在编辑器中开启搜索并手动输入正则匹配检查英文或数字周围的标点是否正确：\n([^${halfwidth}]|\s)(${halfwidth}+)([^${halfwidth}]|\s)`)
+		//console.log(String.raw`2. 除 1 中指出的位置及 Markdown 标记需使用半角标点以外，其他位置建议使用全角标点。请在编辑器中开启搜索并手动输入正则匹配检查半角标点是否应该转为全角标点：[\?~:!,\.'\"\-;\(\)\[\]\{\}]`)
 
 		return textObj.getText();
 	};
@@ -354,8 +365,12 @@ class PanguFormatter {
 
 	/* 专有名词使用正确的大小写；不使用不地道的缩写 */
 	properNounsAndAbbreviations(){
-		console.log('对于专有名词和英文缩写：');
-		console.log("1. 如果文档中存在专有名词，请自行确认其大小写是否正确。\n2. 如果文档中使用了英文缩写，请自学确认缩写是否规范、通用。")
+		//console.log('对于专有名词和英文缩写：');
+		//console.log("1. 如果文档中存在专有名词，请自行确认其大小写是否正确。\n2. 如果文档中使用了英文缩写，请自学确认缩写是否规范、通用。")
+	}
+
+	log(){
+		this.properNounsAndAbbreviations();
 	}
 };
 
@@ -394,19 +409,19 @@ class withMeta extends noMeta {
 		let g1 = this.group1;
 		let g2 = this.group2;
 		//?默认为内部不包含meta1和meta2；默认空白不会影响样式
-		text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g1 + `(${m2})` + needTo + g2, "g"), `$4${replaceTo}$6`);
-		text = text.replace(new RegExp(g1 + needTo + `(${m1})` + g2 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), `$1${replaceTo}$3`);
+		text = text.replace(new RegExp(`(${m1})` + `(((?!${m1}|${m2}).)*)` + g1 + `(${m2})` + needTo + g2, "g"), `$1$2$4$5${replaceTo}$7`);
+		text = text.replace(new RegExp(g1 + needTo + `(${m1})` + g2 + `(((?!${m1}|${m2}).)*)` + `(${m2})`, "g"), `$1${replaceTo}$3$4$5$7`);
 		if(!this.oneSide){
-			text = text.replace(new RegExp(`(${m1})` + `((?!${m1}|${m2}).)*` + g2 + `(${m2})` + needTo + g1, "g"), `$4${replaceTo}$6`);
-			text = text.replace(new RegExp(g2 + needTo + `(${m1})` + g1 + `((?!${m1}|${m2}).)*` + `(${m2})`, "g"), `$1${replaceTo}$3`);
+			text = text.replace(new RegExp(`(${m1})` + `(((?!${m1}|${m2}).)*)` + g2 + `(${m2})` + needTo + g1, "g"), `$1$2$4$5${replaceTo}$7`);
+			text = text.replace(new RegExp(g2 + needTo + `(${m1})` + g1 + `(((?!${m1}|${m2}).)*)` + `(${m2})`, "g"), `$1${replaceTo}$3$4$5$7`);
 		}
 		return text;
 	}
 }
 
 class withLink extends noMeta {
-	constructor(group1, group2, meta1, meta2, meta3, meta4){
-		super(group1, group2);
+	constructor(group1, group2, oneSide, meta1, meta2, meta3, meta4){
+		super(group1, group2, oneSide);
 		this.meta1 = meta1;
 		this.meta2 = meta2;
 		this.meta3 = meta3;
@@ -424,10 +439,13 @@ class withLink extends noMeta {
 		//?默认两种元字符都不包含
 		let repeate1 = `${m1}${m2}`;
 		let repeate2 = `${m3}${m4}`;
-		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g1 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + needTo + g2, "g"), `$6${replaceTo}$8`);
-		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g2 + `(${m2}${m3}([^${repeate2}]*)(${m4})` + needTo + g1, "g"), `$6${replaceTo}$8`);
-		text = text.replace(new RegExp(g2 + needTo + `(${m1})` + g1 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), `$1${replaceTo}$3`);
-		text = text.replace(new RegExp(g1 + needTo + `(${m1})` + g2 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), `$1${replaceTo}$3`);
+		
+		text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g1 + `(${m2}${m3})([^${repeate2}]*)(${m4})` + needTo + g2, "g"), `$1$2$3$4$5$6${replaceTo}$8`);
+		text = text.replace(new RegExp(g1 + needTo + `(${m1})` + g2 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), `$1${replaceTo}$3$4$5$6$7$8`);
+		if(!this.oneSide){
+			text = text.replace(new RegExp(`(${m1})([^${repeate1}]*)` + g2 + `(${m2}${m3})([^${repeate2}]*)(${m4})` + needTo + g1, "g"), `$1$2$3$4$5$6${replaceTo}$8`);
+			text = text.replace(new RegExp(g2 + needTo + `(${m1})` + g1 + `([^${repeate1}]*)(${m2}${m3})([^${repeate2}]*)(${m4})`, "g"), `$1${replaceTo}$3$4$5$6$7$8`);
+		}
 		return text;
 	}
 }
@@ -471,7 +489,7 @@ class Text {
 		let ignored = this.ignoredText.split('');
 		let text = this.text;
 		for (let index = 0; index < beforeIgnore.length; index++) {
-			if(beforeIgnore[index] != ignored[index]){
+			if(beforeIgnore[index] != ignored[index] && ignored[index] == 'ꏝ'){
 				text = text.replace('ꏝ', beforeIgnore[index]);
 			}
 		}
@@ -498,8 +516,8 @@ class Text {
 			matchers.push(new withMeta(group1, group2, oneSide, `==`, `==`));
 			// （考虑~~）
 			matchers.push(new withMeta(group1, group2, oneSide, `~~`, `~~`));
-			// （考虑++）
-			matchers.push(new withMeta(group1, group2, oneSide, `++`, `++`));
+			// （考虑++）（+为正则元字符，需转义）
+			matchers.push(new withMeta(group1, group2, oneSide, `\\+\\+`, `\\+\\+`));
 			// （考虑_）
 			matchers.push(new withMeta(group1, group2, oneSide, `_`, `_`));
 			// （考虑<>）
@@ -507,9 +525,9 @@ class Text {
 			// （考虑<u>）
 			matchers.push(new withMeta(group1, group2, oneSide, `<u>`, `</u>`));
 			// （考虑[]()）
-			matchers.push(new withLink(group1, group2, String.raw`\[`, String.raw`\]`, String.raw`\(`, String.raw`\)`));
+			matchers.push(new withLink(group1, group2, oneSide, String.raw`\[`, String.raw`\]`, String.raw`\(`, String.raw`\)`));
 			// （考虑[][]）
-			matchers.push(new withLink(group1, group2, String.raw`\[`, String.raw`\]`, String.raw`\[`, String.raw`\]`));
+			matchers.push(new withLink(group1, group2, oneSide, String.raw`\[`, String.raw`\]`, String.raw`\[`, String.raw`\]`));
 
 			for (let index = 0; index < matchers.length; index++) {
 				const matcher = matchers[index];
