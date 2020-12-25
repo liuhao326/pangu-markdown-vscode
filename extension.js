@@ -9,46 +9,43 @@ const vscode = require('vscode');
  * 方法被激活时调用的函数
  */
 function activate(context) {
-	/* if(!wsPath){
-				vscode.window.showInformationMessage('建议在文件夹中打开文件以方便比较差异。是否打开文件夹？', Message).then(selection => {
-					if (selection === Message) {
-						let filePath = vscode.window.activeTextEditor.document.fileName;
-						let fileFolder = filePath.replace(/\/.*$/, '');
-						let uri = vscode.Uri.file(fileFolder);
-						vscode.commands.executeCommand('vscode.openFolder', uri);
-					}
-				});
-			} */
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "pangu-markdown-vscode" is now active!');
 	let format = vscode.commands.registerCommand('pangu-markdown-vscode.formatPangu', () => {
 		let editor = new Editor();
 		let doc = editor.getDoc();
-		if (doc.languageId === "markdown") {
-			vscode.window.activeTextEditor.edit((editorBuilder) => {
-				let originText = doc.getText();
-				let config = editor.getConfig('pangu-markdown-vscode');
-				let newText = new PanguFormatter(config).pangu(originText);
-				editorBuilder.replace(editor.getDocRange(), newText);
-				const wsPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
-				console.log(wsPath);
-				const Message = '确定';
-				vscode.window.showInformationMessage('处理完成，比较差异？', Message).then(selection => {
-					if (selection === Message) {
-						const wsedit = new vscode.WorkspaceEdit();
-						const filePath = vscode.Uri.file(wsPath + '/pangu-temp.md');
-						wsedit.createFile(filePath, { ignoreIfExists: true });
-						wsedit.insert(filePath, new vscode.Position(0, 0), originText);
-						vscode.workspace.applyEdit(wsedit);
-						let origin = filePath;
-						let newOne = vscode.Uri.file(vscode.window.activeTextEditor.document.fileName);
-						editor.diff(origin, newOne, 'originText —> newText');
-					}
-				});
-			});
-		} else {
+		if(doc.languageId != "markdown"){
 			vscode.window.showInformationMessage('不能处理非 Markdown 格式的文件。');
-		};
+			return;
+		}
+		vscode.window.activeTextEditor.edit((editorBuilder) => {
+			const Message = '确定';
+			const originText = doc.getText();
+			const config = editor.getConfig('pangu-markdown-vscode');
+			const newText = new PanguFormatter(config).pangu(originText);
+			editorBuilder.replace(editor.getDocRange(), newText);
+			const targetFilePath = vscode.window.activeTextEditor.document.fileName;
+			vscode.window.showInformationMessage('处理完成，比较差异？', Message).then(selection => {
+				if (selection === Message) {
+					const workspaceEdit = new vscode.WorkspaceEdit();
+					const tempFilePath = targetFilePath.replace(/(\\[^\\]*)(\.)/, `$1(origin)$2`)
+					const tempFile = vscode.Uri.file(tempFilePath);
+					workspaceEdit.createFile(tempFile);
+					workspaceEdit.insert(tempFile, new vscode.Position(0, 0), originText);
+					vscode.workspace.applyEdit(workspaceEdit).then(()=>{
+						vscode.workspace.openTextDocument(tempFile).then((textDocument) => {
+							textDocument.save();
+							const targetFile = vscode.Uri.file(targetFilePath);
+							editor.diff(tempFile, targetFile, 'originText -> newText');
+							vscode.workspace.onDidCloseTextDocument(textDocument => {
+								if(textDocument.fileName == tempFilePath)
+									vscode.workspace.fs.delete(tempFile);
+							});
+						});
+					});
+				}
+			});
+		});
 	});
 	context.subscriptions.push(format);
 	context.subscriptions.push(new Watcher());
