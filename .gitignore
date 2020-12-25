@@ -4,3 +4,7 @@ node_modules
 *.vsix
 doc/TODO.md
 test/text.js
+publish.bat
+tempCodeRunnerFile.javascript
+test.bat
+test/tempCodeRunnerFile.js
