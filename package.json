@@ -34,52 +34,62 @@
 		},
 		"configuration": {
 			"type": "object",
-			"title": "Pangu Configuration",
+			"title": "Pangu",
 			"properties": {
-				"pangu-markdown-vscode.auto_format_on_save": {
+				"pangu-markdown-vscode.autoFormatOnSave": {
 					"type": "boolean",
 					"default": false,
-					"description": "Auto apply Pangu format on save"
+					"description": "保存时自动格式化"
 				},
-				"pangu-markdown-vscode.covert_Chinese_quotations": {
+				"pangu-markdown-vscode.covertChineseQuotations": {
 					"type": "boolean",
 					"default": false,
-					"description": "Covert “” and ‘’ to 『』 and 「」"
+					"description": "“”和‘’转为「」和『』"
 				},
-				"pangu-markdown-vscode.covert_English_quotations": {
+				"pangu-markdown-vscode.covertEnglishQuotations": {
 					"type": "boolean",
 					"default": false,
-					"description": "Covert \"\" and '' to 『』 and 「」"
+					"description": "\"\" 和 '' 转为『』和「」"
 				},
-				"pangu-markdown-vscode.delete_extra_blank_lines": {
+				"pangu-markdown-vscode.deleteExtraBlankLines": {
 					"type": "boolean",
 					"default": false,
-					"description": "Replace multiple blank lines with one blank line"
+					"description": "删除多余空行"
 				},
-				"pangu-markdown-vscode.convert_fullwidthChars": {
+				"pangu-markdown-vscode.convertFullwidthChars": {
 					"type": "boolean",
 					"default": false,
-					"description": "Convert fullwidth character to halfwidth character"
+					"description": "全角字母转为半角字母"
 				},
-				"pangu-markdown-vscode.convert_fullwidthNums": {
+				"pangu-markdown-vscode.convertFullwidthNums": {
 					"type": "boolean",
 					"default": true,
-					"description": "Convert fullwidth number to halfwidth number"
+					"description": "全角数字转为全角数字"
 				},
-				"pangu-markdown-vscode.condense_punctuation": {
+				"pangu-markdown-vscode.condensePunctuation": {
 					"type": "boolean",
 					"default": true,
-					"description": "Replace repeated punctuation marks with one"
+					"description": "重复标点缩减为一个"
 				},
-				"pangu-markdown-vscode.addSpace_for_code": {
+				"pangu-markdown-vscode.addSpaceForCode": {
 					"type": "boolean",
 					"default": false,
-					"description": "Add spaces at both ends of the code（`）"
+					"description": "行内代码两侧添加空格"
 				},
-				"pangu-markdown-vscode.addSpace_for_link": {
+				"pangu-markdown-vscode.addSpaceForLink": {
 					"type": "boolean",
 					"default": false,
-					"description": "Add spaces at both ends of the link（[...](...)）"
+					"description": "链接两侧添加空格"
+				},
+				"pangu-markdown-vscode.deleteLFThatWillBeIgnored": {
+					"type": "boolean",
+					"default": false,
+					"description": "删除会被忽略 Markdown 的换行"
+				},
+				"pangu-markdown-vscode.units": {
+					"type": "string",
+					"default": "nm|um|mm|cm|dm|m|km",
+					"description": "扩展会在数字与这里的单位之间添加空格（除了°），添加单位时请使用竖线（|）分隔"
 				}
 			}
 		}
